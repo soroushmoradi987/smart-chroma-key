@@ -1,0 +1,465 @@
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform float2 texel_size;
+
+// ==========================================
+// 1. Chroma Key
+// ==========================================
+uniform float4 KeyColor <
+    string name = "Key Color";
+    string field_type = "color";
+> = {0.0, 1.0, 0.0, 1.0};
+
+uniform float BaseKey <
+    string name = "Green Threshold";
+    string field_type = "slider";
+    float minimum = -0.5;
+    float maximum = 1.0;
+    float step = 0.001;
+> = 0.0;
+
+uniform float EdgeSoftness <
+    string name = "Edge Softness";
+    string field_type = "slider";
+    float minimum = 0.001;
+    float maximum = 1.0;
+    float step = 0.001;
+> = 0.05;
+
+uniform float BackgroundClean <
+    string name = "Clean Noise";
+    string field_type = "slider";
+    float minimum = 0.0;
+    float maximum = 1.0;
+    float step = 0.001;
+> = 0.0;
+
+// ==========================================
+// 2. Hair Detail Recovery
+// ==========================================
+uniform float HairDetail <
+    string name = "Hair Detail";
+    string field_type = "slider";
+    float minimum = 0.0;
+    float maximum = 1.0;
+    float step = 0.01;
+> = 0.0;
+
+uniform float HairSoftness <
+    string name = "Hair Softness";
+    string field_type = "slider";
+    float minimum = 0.0;
+    float maximum = 1.0;
+    float step = 0.01;
+> = 0.5;
+
+// ==========================================
+// 3. Edge Refinement
+// ==========================================
+uniform float EdgeBlur <
+    string name = "Edge Blur";
+    string field_type = "slider";
+    float minimum = 0.0;
+    float maximum = 5.0;
+    float step = 0.1;
+> = 0.0;
+
+uniform float EdgeShrink <
+    string name = "Edge Shrink";
+    string field_type = "slider";
+    float minimum = 0.0;
+    float maximum = 1.0;
+    float step = 0.01;
+> = 0.0;
+
+uniform float EdgeGrow <
+    string name = "Edge Grow";
+    string field_type = "slider";
+    float minimum = 0.0;
+    float maximum = 1.0;
+    float step = 0.01;
+> = 0.0;
+
+// ==========================================
+// 4. Despill & Hair Color
+// ==========================================
+uniform float4 HairColor <
+    string name = "Hair Color";
+    string field_type = "color";
+> = {0.2, 0.1, 0.05, 1.0};
+
+uniform float SpillReduction <
+    string name = "Despill";
+    string field_type = "slider";
+    float minimum = 0.0;
+    float maximum = 2.0;
+    float step = 0.01;
+> = 1.0;
+
+uniform float DespillLight <
+    string name = "Despill Light Areas";
+    string field_type = "slider";
+    float minimum = 0.0;
+    float maximum = 2.0;
+    float step = 0.01;
+> = 1.0;
+
+uniform float DespillDark <
+    string name = "Despill Dark Areas";
+    string field_type = "slider";
+    float minimum = 0.0;
+    float maximum = 2.0;
+    float step = 0.01;
+> = 1.0;
+
+uniform float ColorInjectStrength <
+    string name = "Color Boost";
+    string field_type = "slider";
+    float minimum = 0.0;
+    float maximum = 5.0;
+    float step = 0.01;
+> = 0.0;
+
+// ==========================================
+// 5. Color Correction
+// ==========================================
+uniform float Brightness <
+    string name = "Brightness";
+    string field_type = "slider";
+    float minimum = -1.0;
+    float maximum = 1.0;
+    float step = 0.01;
+> = 0.0;
+
+uniform float Contrast <
+    string name = "Contrast";
+    string field_type = "slider";
+    float minimum = 0.0;
+    float maximum = 3.0;
+    float step = 0.01;
+> = 1.0;
+
+uniform float Saturation <
+    string name = "Saturation";
+    string field_type = "slider";
+    float minimum = 0.0;
+    float maximum = 3.0;
+    float step = 0.01;
+> = 1.0;
+
+uniform float Gamma <
+    string name = "Gamma";
+    string field_type = "slider";
+    float minimum = 0.1;
+    float maximum = 3.0;
+    float step = 0.01;
+> = 1.0;
+
+uniform float Temperature <
+    string name = "Temperature";
+    string field_type = "slider";
+    float minimum = -1.0;
+    float maximum = 1.0;
+    float step = 0.01;
+> = 0.0;
+
+uniform float Tint <
+    string name = "Tint";
+    string field_type = "slider";
+    float minimum = -1.0;
+    float maximum = 1.0;
+    float step = 0.01;
+> = 0.0;
+
+// ==========================================
+// 6. Key Processing
+// ==========================================
+uniform float KeySatBoost <
+    string name = "Key Saturation Boost";
+    string field_type = "slider";
+    float minimum = 1.0;
+    float maximum = 5.0;
+    float step = 0.01;
+> = 1.0;
+
+// ==========================================
+// 7. Opacity
+// ==========================================
+uniform float Opacity <
+    string name = "Opacity";
+    string field_type = "slider";
+    float minimum = 0.0;
+    float maximum = 1.0;
+    float step = 0.01;
+> = 1.0;
+
+sampler_state def_sampler {
+    Filter   = Linear;
+    AddressU = Clamp;
+    AddressV = Clamp;
+};
+
+struct VertData {
+    float4 pos : POSITION;
+    float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in) {
+    VertData vert_out;
+    vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+    vert_out.uv  = v_in.uv;
+    return vert_out;
+}
+
+// Boost saturation for keying signal
+float3 boost_sat(float3 rgb, float amount) {
+    float l = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+    return lerp(float3(l, l, l), rgb, amount);
+}
+
+// Core key: green difference method (proven reliable)
+float compute_core_alpha(float4 c) {
+    float3 boosted = boost_sat(c.rgb, KeySatBoost);
+    float green_diff = boosted.g - max(boosted.r, boosted.b);
+    float alpha = 1.0 - smoothstep(BaseKey, BaseKey + EdgeSoftness, green_diff);
+    return saturate(alpha);
+}
+
+// Hair detail key: luminance-based recovery for dark hair on green
+float compute_hair_alpha(float4 c) {
+    float3 boosted = boost_sat(c.rgb, KeySatBoost);
+    float green_diff = boosted.g - max(boosted.r, boosted.b);
+    float luma = dot(c.rgb, float3(0.2126, 0.7152, 0.0722));
+
+    float is_dark = 1.0 - smoothstep(0.05, HairSoftness * 0.6 + 0.05, luma);
+    float has_green = smoothstep(-0.02, 0.08, green_diff);
+    float not_pure_screen = 1.0 - smoothstep(0.1, 0.3, green_diff);
+
+    return saturate(is_dark * has_green * not_pure_screen);
+}
+
+float4 PSUltimateKey(VertData v_in) : TARGET {
+    float4 color = image.Sample(def_sampler, v_in.uv);
+
+    // 1. Core alpha
+    float core_alpha = compute_core_alpha(color);
+
+    // 2. Advanced Hair Recovery: Screen Subtraction + 8-Neighbor Structure Analysis
+    //
+    // Technique: Combines Ultimatte-style screen subtraction for natural partial
+    // transparency with neighbor analysis to detect thin structures (hair strands).
+    //
+    // Screen Subtraction: pixel = foreground * alpha + screen * (1-alpha)
+    // Solving: alpha = 1 - (pixel_green_diff / screen_green_diff)
+    //
+    // Neighbor Analysis: if surrounding pixels are green screen but this pixel
+    // is darker/different, it's a thin foreground element (hair strand).
+
+    float3 cb = boost_sat(color.rgb, KeySatBoost);
+    float c_gd = cb.g - max(cb.r, cb.b);
+    float c_luma = dot(color.rgb, float3(0.2126, 0.7152, 0.0722));
+
+    // --- Screen Subtraction Alpha ---
+    float3 kb = boost_sat(KeyColor.rgb, KeySatBoost);
+    float key_gd = max(kb.g - max(kb.r, kb.b), 0.01);
+    float screen_sub_alpha = 1.0 - saturate(c_gd / key_gd);
+
+    // --- 8-Neighbor Structure Analysis (1px distance) ---
+    float neighbor_screen_sum = 0.0;
+    float neighbor_luma_sum = 0.0;
+    float thresh = max(BaseKey, 0.0) + EdgeSoftness * 0.3;
+    float3 nb;
+    float ngd;
+
+    // Left
+    nb = boost_sat(image.Sample(def_sampler, v_in.uv + float2(-1.0, 0.0) * texel_size).rgb, KeySatBoost);
+    ngd = nb.g - max(nb.r, nb.b);
+    neighbor_screen_sum += smoothstep(thresh * 0.5, thresh, ngd);
+    neighbor_luma_sum += dot(nb, float3(0.2126, 0.7152, 0.0722));
+
+    // Right
+    nb = boost_sat(image.Sample(def_sampler, v_in.uv + float2(1.0, 0.0) * texel_size).rgb, KeySatBoost);
+    ngd = nb.g - max(nb.r, nb.b);
+    neighbor_screen_sum += smoothstep(thresh * 0.5, thresh, ngd);
+    neighbor_luma_sum += dot(nb, float3(0.2126, 0.7152, 0.0722));
+
+    // Up
+    nb = boost_sat(image.Sample(def_sampler, v_in.uv + float2(0.0, -1.0) * texel_size).rgb, KeySatBoost);
+    ngd = nb.g - max(nb.r, nb.b);
+    neighbor_screen_sum += smoothstep(thresh * 0.5, thresh, ngd);
+    neighbor_luma_sum += dot(nb, float3(0.2126, 0.7152, 0.0722));
+
+    // Down
+    nb = boost_sat(image.Sample(def_sampler, v_in.uv + float2(0.0, 1.0) * texel_size).rgb, KeySatBoost);
+    ngd = nb.g - max(nb.r, nb.b);
+    neighbor_screen_sum += smoothstep(thresh * 0.5, thresh, ngd);
+    neighbor_luma_sum += dot(nb, float3(0.2126, 0.7152, 0.0722));
+
+    // Top-Left
+    nb = boost_sat(image.Sample(def_sampler, v_in.uv + float2(-1.0, -1.0) * texel_size).rgb, KeySatBoost);
+    ngd = nb.g - max(nb.r, nb.b);
+    neighbor_screen_sum += smoothstep(thresh * 0.5, thresh, ngd);
+    neighbor_luma_sum += dot(nb, float3(0.2126, 0.7152, 0.0722));
+
+    // Top-Right
+    nb = boost_sat(image.Sample(def_sampler, v_in.uv + float2(1.0, -1.0) * texel_size).rgb, KeySatBoost);
+    ngd = nb.g - max(nb.r, nb.b);
+    neighbor_screen_sum += smoothstep(thresh * 0.5, thresh, ngd);
+    neighbor_luma_sum += dot(nb, float3(0.2126, 0.7152, 0.0722));
+
+    // Bottom-Left
+    nb = boost_sat(image.Sample(def_sampler, v_in.uv + float2(-1.0, 1.0) * texel_size).rgb, KeySatBoost);
+    ngd = nb.g - max(nb.r, nb.b);
+    neighbor_screen_sum += smoothstep(thresh * 0.5, thresh, ngd);
+    neighbor_luma_sum += dot(nb, float3(0.2126, 0.7152, 0.0722));
+
+    // Bottom-Right
+    nb = boost_sat(image.Sample(def_sampler, v_in.uv + float2(1.0, 1.0) * texel_size).rgb, KeySatBoost);
+    ngd = nb.g - max(nb.r, nb.b);
+    neighbor_screen_sum += smoothstep(thresh * 0.5, thresh, ngd);
+    neighbor_luma_sum += dot(nb, float3(0.2126, 0.7152, 0.0722));
+
+    float surround_screen = neighbor_screen_sum * 0.125;
+    float avg_neighbor_luma = neighbor_luma_sum * 0.125;
+
+    // --- Hair Strand Detection ---
+    // Local contrast: hair strands are darker than surrounding green screen
+    float darkness_contrast = saturate((avg_neighbor_luma - c_luma) * 3.0);
+
+    // Has green contamination (mixed with screen) but is not pure screen
+    float has_green_mix = smoothstep(-0.02, 0.05, c_gd);
+    float is_clearly_screen = smoothstep(thresh * 0.5, thresh * 0.9, c_gd);
+
+    // Hair score via local contrast: surrounded by screen + darker
+    float hair_by_contrast = surround_screen * darkness_contrast * has_green_mix * (1.0 - is_clearly_screen);
+
+    // Hair score via pure darkness: very dark pixel near screen
+    float very_dark = smoothstep(HairSoftness * 0.4 + 0.05, 0.0, c_luma);
+    float hair_by_darkness = surround_screen * very_dark * has_green_mix;
+
+    // Basic hair detection (single-pixel, no neighbors - original method)
+    float basic_hair = compute_hair_alpha(color);
+
+    // Combined hair detection (max of all methods)
+    float hair_detection = max(max(hair_by_contrast, hair_by_darkness), basic_hair);
+    float hair_confidence = smoothstep(0.1, 0.5, hair_detection);
+
+    // Final hair alpha: use screen subtraction for natural partial transparency
+    // Screen subtraction gives physically accurate partial alpha for hair strands
+    float hair_alpha = screen_sub_alpha * hair_confidence;
+
+    // 3. Combine core + hair
+    float alpha = max(core_alpha, hair_alpha * HairDetail);
+
+    // 4. Edge blur (5x5 gaussian on alpha, unrolled)
+    float blur_radius = EdgeBlur;
+    float blurred_alpha = alpha;
+    if (blur_radius > 0.01) {
+        float2 ps = texel_size * blur_radius;
+        float sum = 0.0;
+        float wt = 0.0;
+        float4 s;
+        float w;
+        float sa;
+
+        // Row -2
+        s = image.Sample(def_sampler, v_in.uv + float2(-2.0*ps.x, -2.0*ps.y)); sa = compute_core_alpha(s); w = 1.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2(-1.0*ps.x, -2.0*ps.y)); sa = compute_core_alpha(s); w = 4.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 0.0,      -2.0*ps.y)); sa = compute_core_alpha(s); w = 6.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 1.0*ps.x, -2.0*ps.y)); sa = compute_core_alpha(s); w = 4.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 2.0*ps.x, -2.0*ps.y)); sa = compute_core_alpha(s); w = 1.0; sum += sa*w; wt += w;
+
+        // Row -1
+        s = image.Sample(def_sampler, v_in.uv + float2(-2.0*ps.x, -1.0*ps.y)); sa = compute_core_alpha(s); w = 4.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2(-1.0*ps.x, -1.0*ps.y)); sa = compute_core_alpha(s); w = 16.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 0.0,      -1.0*ps.y)); sa = compute_core_alpha(s); w = 24.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 1.0*ps.x, -1.0*ps.y)); sa = compute_core_alpha(s); w = 16.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 2.0*ps.x, -1.0*ps.y)); sa = compute_core_alpha(s); w = 4.0; sum += sa*w; wt += w;
+
+        // Row 0
+        s = image.Sample(def_sampler, v_in.uv + float2(-2.0*ps.x, 0.0)); sa = compute_core_alpha(s); w = 6.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2(-1.0*ps.x, 0.0)); sa = compute_core_alpha(s); w = 24.0; sum += sa*w; wt += w;
+        w = 36.0; sum += core_alpha*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 1.0*ps.x, 0.0)); sa = compute_core_alpha(s); w = 24.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 2.0*ps.x, 0.0)); sa = compute_core_alpha(s); w = 6.0; sum += sa*w; wt += w;
+
+        // Row 1
+        s = image.Sample(def_sampler, v_in.uv + float2(-2.0*ps.x, 1.0*ps.y)); sa = compute_core_alpha(s); w = 4.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2(-1.0*ps.x, 1.0*ps.y)); sa = compute_core_alpha(s); w = 16.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 0.0,       1.0*ps.y)); sa = compute_core_alpha(s); w = 24.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 1.0*ps.x, 1.0*ps.y)); sa = compute_core_alpha(s); w = 16.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 2.0*ps.x, 1.0*ps.y)); sa = compute_core_alpha(s); w = 4.0; sum += sa*w; wt += w;
+
+        // Row 2
+        s = image.Sample(def_sampler, v_in.uv + float2(-2.0*ps.x, 2.0*ps.y)); sa = compute_core_alpha(s); w = 1.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2(-1.0*ps.x, 2.0*ps.y)); sa = compute_core_alpha(s); w = 4.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 0.0,       2.0*ps.y)); sa = compute_core_alpha(s); w = 6.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 1.0*ps.x, 2.0*ps.y)); sa = compute_core_alpha(s); w = 4.0; sum += sa*w; wt += w;
+        s = image.Sample(def_sampler, v_in.uv + float2( 2.0*ps.x, 2.0*ps.y)); sa = compute_core_alpha(s); w = 1.0; sum += sa*w; wt += w;
+
+        blurred_alpha = sum / wt;
+    }
+
+    // Re-apply hair detail after blur (preserve thin strands that blur would smooth away)
+    alpha = max(blurred_alpha, hair_alpha * HairDetail);
+
+    // 5. Background noise removal
+    alpha = smoothstep(BackgroundClean, 1.0, alpha);
+
+    // 6. Edge shrink / grow
+    alpha = saturate((alpha - EdgeShrink) / max(1.0 - EdgeShrink, 0.001));
+    alpha = saturate(alpha / max(1.0 - EdgeGrow, 0.001));
+
+    // 7. Despill: dual method
+    float green_excess_basic = color.g - max(color.r, color.b);
+    float green_excess_avg = color.g - (color.r + color.b) * 0.5;
+    float edge_spill_mask = 1.0 - smoothstep(0.85, 1.0, alpha);
+    float green_excess = max(green_excess_basic, green_excess_avg * edge_spill_mask);
+
+    if (green_excess > 0.0) {
+        float pixel_luma = dot(color.rgb, float3(0.2126, 0.7152, 0.0722));
+        float light_factor = smoothstep(0.3, 0.7, pixel_luma);
+        float despill_strength = lerp(DespillDark, DespillLight, light_factor) * SpillReduction;
+
+        color.g -= green_excess * despill_strength;
+        color.r += green_excess * despill_strength * 0.12;
+        color.b += green_excess * despill_strength * 0.08;
+    }
+    color.rgb = max(color.rgb, float3(0.0, 0.0, 0.0));
+
+    // 8. Hair color injection on edges
+    float edge_factor = saturate(1.0 - abs(alpha * 2.0 - 1.0));
+    float3 injected = HairColor.rgb * max(green_excess_basic, 0.0) * ColorInjectStrength * edge_factor;
+    color.rgb += injected;
+
+    // 9. Gamma correction
+    color.rgb = pow(max(color.rgb, float3(0.0001, 0.0001, 0.0001)), float3(1.0 / Gamma, 1.0 / Gamma, 1.0 / Gamma));
+
+    // 10. Brightness and contrast
+    color.rgb = (color.rgb - 0.5) * Contrast + 0.5 + Brightness;
+
+    // 11. Temperature
+    color.r += Temperature * 0.1;
+    color.b -= Temperature * 0.1;
+
+    // 12. Tint
+    color.g += Tint * 0.1;
+
+    // 13. Saturation
+    float luma = dot(color.rgb, float3(0.2126, 0.7152, 0.0722));
+    color.rgb = lerp(float3(luma, luma, luma), color.rgb, Saturation);
+
+    color.rgb = saturate(color.rgb);
+
+    // 14. Apply alpha with opacity
+    color.a *= clamp(alpha, 0.0, 1.0) * Opacity;
+
+    return color;
+}
+
+technique Draw {
+    pass {
+        vertex_shader = VSDefault(v_in);
+        pixel_shader  = PSUltimateKey(v_in);
+    }
+}
