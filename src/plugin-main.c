@@ -54,9 +54,11 @@ struct smart_chroma_data {
 	float opacity;
 
 	/* Auto-tune */
-	bool auto_tune_requested;
+	int auto_tune_phase; /* 0=idle, 1=render+stage, 2=map+read */
 	gs_texrender_t *texrender;
 	gs_stagesurf_t *stagesurf;
+	uint32_t at_width;
+	uint32_t at_height;
 };
 
 static const char *smart_chroma_name(void *unused)
@@ -149,17 +151,24 @@ static void smart_chroma_destroy(void *data)
 	bfree(f);
 }
 
-/* Auto-tune: called from render thread to sample the frame */
-static void do_auto_tune(struct smart_chroma_data *f)
+/* Auto-tune phase 1: render source to texrender and stage to CPU */
+static void auto_tune_phase1(struct smart_chroma_data *f)
 {
 	obs_source_t *target = obs_filter_get_target(f->context);
-	if (!target)
+	if (!target) {
+		f->auto_tune_phase = 0;
 		return;
+	}
 
 	uint32_t w = obs_source_get_base_width(target);
 	uint32_t h = obs_source_get_base_height(target);
-	if (w == 0 || h == 0)
+	if (w == 0 || h == 0) {
+		f->auto_tune_phase = 0;
 		return;
+	}
+
+	f->at_width = w;
+	f->at_height = h;
 
 	/* Create or recreate stagesurface if needed */
 	if (f->stagesurf) {
@@ -173,28 +182,55 @@ static void do_auto_tune(struct smart_chroma_data *f)
 	if (!f->stagesurf)
 		f->stagesurf = gs_stagesurface_create(w, h, GS_RGBA);
 
-	/* Render source to texrender */
-	gs_texrender_reset(f->texrender);
-	if (gs_texrender_begin(f->texrender, w, h)) {
-		struct vec4 clear_color;
-		vec4_zero(&clear_color);
-		gs_clear(GS_CLEAR_COLOR, &clear_color, 0.0f, 0);
-		gs_ortho(0.0f, (float)w, 0.0f, (float)h, -1.0f, 1.0f);
-		obs_source_video_render(target);
-		gs_texrender_end(f->texrender);
+	if (!f->stagesurf) {
+		f->auto_tune_phase = 0;
+		return;
 	}
 
-	gs_texture_t *tex = gs_texrender_get_texture(f->texrender);
-	if (!tex)
+	/* Render source to texrender */
+	gs_texrender_reset(f->texrender);
+	if (!gs_texrender_begin(f->texrender, w, h)) {
+		f->auto_tune_phase = 0;
 		return;
+	}
+	struct vec4 clear_color;
+	vec4_zero(&clear_color);
+	gs_clear(GS_CLEAR_COLOR, &clear_color, 0.0f, 0);
+	gs_ortho(0.0f, (float)w, 0.0f, (float)h, -1.0f, 1.0f);
+	obs_source_video_render(target);
+	gs_texrender_end(f->texrender);
 
+	gs_texture_t *tex = gs_texrender_get_texture(f->texrender);
+	if (!tex) {
+		f->auto_tune_phase = 0;
+		return;
+	}
+
+	/* Stage (async GPU->CPU copy) */
 	gs_stage_texture(f->stagesurf, tex);
+
+	/* Next frame will read it */
+	f->auto_tune_phase = 2;
+}
+
+/* Auto-tune phase 2: map stagesurface and read pixel data */
+static void auto_tune_phase2(struct smart_chroma_data *f)
+{
+	uint32_t w = f->at_width;
+	uint32_t h = f->at_height;
+
+	if (w == 0 || h == 0 || !f->stagesurf) {
+		f->auto_tune_phase = 0;
+		return;
+	}
 
 	uint8_t *video_data = NULL;
 	uint32_t linesize = 0;
 
-	if (!gs_stagesurface_map(f->stagesurf, &video_data, &linesize))
+	if (!gs_stagesurface_map(f->stagesurf, &video_data, &linesize)) {
+		f->auto_tune_phase = 0;
 		return;
+	}
 
 	/* Sample 9 points around the borders (corners + edge midpoints) */
 	float avg_r = 0.0f, avg_g = 0.0f, avg_b = 0.0f;
@@ -233,6 +269,7 @@ static void do_auto_tune(struct smart_chroma_data *f)
 	}
 
 	gs_stagesurface_unmap(f->stagesurf);
+	f->auto_tune_phase = 0;
 
 	if (count == 0)
 		return;
@@ -255,8 +292,6 @@ static void do_auto_tune(struct smart_chroma_data *f)
 	obs_data_set_int(settings, "key_color", (long long)key_color);
 
 	/* Auto-tune based on screen characteristics */
-	/* Use negative BaseKey for aggressive keying + high EdgeSoftness for soft edges */
-	/* These values are calibrated from real-world green screen testing */
 	float auto_base_key = -0.05f - green_diff * 0.2f;
 	if (auto_base_key < -0.3f)
 		auto_base_key = -0.3f;
@@ -300,7 +335,7 @@ static bool auto_tune_clicked(obs_properties_t *props,
 	UNUSED_PARAMETER(props);
 	UNUSED_PARAMETER(property);
 	struct smart_chroma_data *f = data;
-	f->auto_tune_requested = true;
+	f->auto_tune_phase = 1;
 	return true;
 }
 
@@ -415,10 +450,12 @@ static void smart_chroma_render(void *data, gs_effect_t *effect)
 	if (!f->effect)
 		return;
 
-	/* Handle auto-tune request (must be done in render thread) */
-	if (f->auto_tune_requested) {
-		f->auto_tune_requested = false;
-		do_auto_tune(f);
+	/* Handle auto-tune request (two-phase: stage in frame 1, read in frame 2) */
+	if (f->auto_tune_phase == 1) {
+		auto_tune_phase1(f);
+		/* phase1 sets phase to 2 on success, 0 on failure */
+	} else if (f->auto_tune_phase == 2) {
+		auto_tune_phase2(f);
 	}
 
 	if (!obs_source_process_filter_begin(f->context, GS_RGBA,

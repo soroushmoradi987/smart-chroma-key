@@ -1,32 +1,69 @@
-# OBS Plugin Template
+# Smart Chroma Key - Professional Green Screen Removal for OBS Studio
 
-## Introduction
+A professional chroma key (green screen removal) plugin for OBS Studio with advanced features for clean, broadcast-quality keying.
 
-The plugin template is meant to be used as a starting point for OBS Studio plugin development. It includes:
+## Features
 
-* Boilerplate plugin source code
-* A CMake project file
-* GitHub Actions workflows and repository actions
+- **Intelligent Auto-Tune**: One-click automatic calibration — samples your green screen from frame borders and sets optimal parameters
+- **Advanced Hair Recovery**: 8-neighbor structure analysis + screen subtraction (Ultimatte-style) preserves thin hair strands
+- **Dual Despill System**: Removes green spill from skin and edges using two complementary methods
+- **5×5 Gaussian Alpha Blur**: Smooth, natural-looking edges
+- **Full Color Correction**: Brightness, contrast, saturation, gamma, temperature, and tint controls
+- **Key Saturation Boost**: Boosts saturation only for keying computation, improving detection without affecting output
 
-## Supported Build Environments
+## Installation
 
-| Platform  | Tool   |
-|-----------|--------|
-| Windows   | Visual Studio 17 2022 |
-| macOS     | XCode 16.0 |
-| Windows, macOS  | CMake 3.30.5 |
-| Ubuntu 24.04 | CMake 3.28.3 |
-| Ubuntu 24.04 | `ninja-build` |
-| Ubuntu 24.04 | `pkg-config`
-| Ubuntu 24.04 | `build-essential` |
+### macOS
+1. Download `smart-chroma-key-macos.zip` from [Releases](../../releases)
+2. Extract and copy `smart-chroma-key.plugin` to:
+   ```
+   ~/Library/Application Support/obs-studio/plugins/
+   ```
+3. Restart OBS Studio
 
-## Quick Start
+### Windows
+1. Download `smart-chroma-key-windows.zip` from [Releases](../../releases)
+2. Extract the `smart-chroma-key` folder
+3. Copy contents to your OBS plugins directory:
+   ```
+   C:\Program Files\obs-studio\obs-plugins\64bit\smart-chroma-key.dll
+   C:\ProgramData\obs-studio\plugins\smart-chroma-key\data\  (effect + locale files)
+   ```
+   Or for portable installs, copy to `obs-studio\data\obs-plugins\smart-chroma-key\`
+4. Restart OBS Studio
 
-An absolute bare-bones [Quick Start Guide](https://github.com/obsproject/obs-plugintemplate/wiki/Quick-Start-Guide) is available in the wiki.
+## Usage
 
-## Documentation
+1. In OBS, right-click your camera source → **Filters**
+2. Click **+** under Effect Filters → Select **Smart Chroma Key**
+3. Click **Auto Tune** for automatic green screen detection
+4. Fine-tune with sliders if needed:
+   - **Base Key / Edge Softness**: Core keying threshold and falloff
+   - **Hair Detail / Hair Softness**: Recover thin hair strands
+   - **Spill Reduction / Despill Light / Despill Dark**: Remove green color cast
+   - **Edge Blur / Shrink / Grow**: Refine alpha edges
 
-All documentation can be found in the [Plugin Template Wiki](https://github.com/obsproject/obs-plugintemplate/wiki).
+## Building from Source
+
+### macOS
+```bash
+cmake --preset macos
+cmake --build build_macos --config Release
+```
+
+### Windows
+```bash
+cmake --preset windows-x64
+cmake --build build_x64 --config Release
+```
+
+## License
+
+GNU General Public License v2.0 - see [LICENSE](LICENSE) for details.
+
+## Credits
+
+Developed by Soroush Moradi.
 
 Suggested reading to get up and running:
 
