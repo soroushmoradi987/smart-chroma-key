@@ -1,5 +1,9 @@
 name: Push
 run-name: ${{ github.ref_name }} push run 🚀
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 on:
   push:
     branches:
