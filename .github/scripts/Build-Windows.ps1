@@ -13,10 +13,6 @@ if ( $DebugPreference -eq 'Continue' ) {
     $InformationPreference = 'Continue'
 }
 
-if ( $env:CI -eq $null ) {
-    throw "Build-Windows.ps1 requires CI environment"
-}
-
 if ( ! ( [System.Environment]::Is64BitOperatingSystem ) ) {
     throw "A 64-bit system is required to build the project."
 }
@@ -36,6 +32,9 @@ function Build {
 
     $ScriptHome = $PSScriptRoot
     $ProjectRoot = Resolve-Path -Path "$PSScriptRoot/../.."
+    $BuildSpec = Get-Content -Path (Join-Path $ProjectRoot 'buildspec.json') -Raw | ConvertFrom-Json
+    $ProductName = $BuildSpec.name
+    $ConfigurePreset = if ( $env:CI -ne $null ) { "windows-ci-${Target}" } else { "windows-${Target}" }
 
     $UtilityFunctions = Get-ChildItem -Path $PSScriptRoot/utils.pwsh/*.ps1 -Recurse
 
@@ -47,7 +46,7 @@ function Build {
     Push-Location -Stack BuildTemp
     Ensure-Location $ProjectRoot
 
-    $CmakeArgs = @('--preset', "windows-ci-${Target}")
+    $CmakeArgs = @('--preset', $ConfigurePreset)
     $CmakeBuildArgs = @('--build')
     $CmakeInstallArgs = @()
 

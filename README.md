@@ -22,15 +22,24 @@ A professional chroma key (green screen removal) plugin for OBS Studio with adva
 3. Restart OBS Studio
 
 ### Windows
-1. Download `smart-chroma-key-windows.zip` from [Releases](../../releases)
-2. Extract the `smart-chroma-key` folder
-3. Copy contents to your OBS plugins directory:
+1. Download `smart-chroma-key-<version>-windows-x64-installer.exe` from [Releases](../../releases) and run the wizard.
+2. If you prefer manual installation or a portable OBS setup, download `smart-chroma-key-windows.zip` instead.
+3. Extract the `smart-chroma-key` folder.
+4. Copy contents to your OBS plugins directory:
    ```
    C:\Program Files\obs-studio\obs-plugins\64bit\smart-chroma-key.dll
    C:\ProgramData\obs-studio\plugins\smart-chroma-key\data\  (effect + locale files)
    ```
    Or for portable installs, copy to `obs-studio\data\obs-plugins\smart-chroma-key\`
-4. Restart OBS Studio
+5. Restart OBS Studio
+
+To build the Windows installer locally on a Windows machine:
+
+```powershell
+pwsh .github/scripts/Build-Installer-Windows.ps1 -Configuration Release -InstallDependencies
+```
+
+The generated files are written to `release/`, including `smart-chroma-key-<version>-windows-x64-installer.exe`.
 
 ## Usage
 
