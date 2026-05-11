@@ -44,36 +44,18 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Configure
-        run: cmake --preset windows-x64
-
-      - name: Build
-        run: cmake --build build_x64 --config Release
-
-      - name: Package
+      - name: Build And Package (ZIP + EXE)
         shell: pwsh
         run: |
-          $pluginDir = "package/smart-chroma-key"
-          New-Item -ItemType Directory -Force -Path "$pluginDir/bin/64bit"
-          New-Item -ItemType Directory -Force -Path "$pluginDir/data/locale"
-
-          # Find and copy the DLL
-          $dll = Get-ChildItem -Recurse -Filter "smart-chroma-key.dll" -Path "build_x64" | Select-Object -First 1
-          if ($dll) {
-            Copy-Item $dll.FullName "$pluginDir/bin/64bit/"
-          }
-
-          # Copy data files
-          Copy-Item "data/smart-chroma-key.effect" "$pluginDir/data/"
-          Copy-Item "data/locale/en-US.ini" "$pluginDir/data/locale/"
-
-          Compress-Archive -Path "package/smart-chroma-key" -DestinationPath "smart-chroma-key-windows.zip"
+          .github/scripts/Build-Installer-Windows.ps1 -Target x64 -Configuration Release -InstallDependencies
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: smart-chroma-key-windows
-          path: smart-chroma-key-windows.zip
+          path: |
+            release/*.zip
+            release/*-installer.exe
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -90,5 +72,6 @@ jobs:
         with:
           files: |
             smart-chroma-key-macos/smart-chroma-key-macos.zip
-            smart-chroma-key-windows/smart-chroma-key-windows.zip
+            smart-chroma-key-windows/*.zip
+            smart-chroma-key-windows/*-installer.exe
           generate_release_notes: true
