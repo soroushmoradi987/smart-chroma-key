@@ -1,0 +1,61 @@
+#define MyAppId "@APP_ID@"
+#define MyAppName "@PRODUCT_DISPLAY_NAME@"
+#define MyAppVersion "@PRODUCT_VERSION@"
+#define MyAppPublisher "@PRODUCT_PUBLISHER@"
+#define MyAppURL "@PRODUCT_URL@"
+#define MyOutputBaseFilename "@OUTPUT_BASENAME@"
+
+[Setup]
+AppId={#MyAppId}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
+AppUpdatesURL={#MyAppURL}
+DefaultDirName={autopf64}\obs-studio
+DefaultGroupName={#MyAppName}
+LicenseFile="@LICENSE_FILE@"
+OutputDir="@OUTPUT_DIR@"
+OutputBaseFilename={#MyOutputBaseFilename}
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+PrivilegesRequired=admin
+Compression=lzma2/max
+SolidCompression=yes
+WizardStyle=modern
+DisableProgramGroupPage=yes
+SetupLogging=yes
+UninstallDisplayName={#MyAppName}
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Files]
+Source: "@STAGING_DIR@\\plugin\\bin\\64bit\\@PRODUCT_NAME@.dll"; DestDir: "{app}\\obs-plugins\\64bit"; Flags: ignoreversion
+Source: "@STAGING_DIR@\\plugin\\data\\*"; DestDir: "{commonappdata}\\obs-studio\\plugins\\@PRODUCT_NAME@\\data"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{commonappdata}\\obs-studio\\plugins\\@PRODUCT_NAME@\\data"
+Type: dirifempty; Name: "{commonappdata}\\obs-studio\\plugins\\@PRODUCT_NAME@"
+
+[Code]
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+
+  if CurPageID = wpSelectDir then
+  begin
+    if not FileExists(ExpandConstant('{app}\\bin\\64bit\\obs64.exe')) then
+    begin
+      Result := MsgBox(
+        'The selected folder does not look like an OBS Studio installation root.' + #13#10 +
+        'The installer will place the plugin DLL under obs-plugins\\64bit inside this folder.' + #13#10 + #13#10 +
+        'Continue anyway?',
+        mbConfirmation,
+        MB_YESNO
+      ) = IDYES;
+    end;
+  end;
+end;
