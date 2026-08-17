@@ -454,11 +454,10 @@ static bool screen_type_modified(obs_properties_t *props, obs_property_t *proper
 
 static obs_properties_t *smart_chroma_properties(void *data)
 {
-	UNUSED_PARAMETER(data);
 	obs_properties_t *p = obs_properties_create();
 
 	/* --- Auto Tune Button --- */
-	obs_properties_add_button(p, "auto_tune", obs_module_text("AutoTune"), auto_tune_clicked);
+	obs_properties_add_button2(p, "auto_tune", obs_module_text("AutoTune"), auto_tune_clicked, data);
 
 	/* --- Chroma Key --- */
 	obs_property_t *screen_type = obs_properties_add_list(p, "screen_type", obs_module_text("ScreenType"),

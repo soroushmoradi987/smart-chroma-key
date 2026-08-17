@@ -76,9 +76,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path (Join-Path $ObsRoot 'bin/64bit') | Out-Null
           New-Item -ItemType File -Force -Path (Join-Path $ObsRoot 'bin/64bit/obs64.exe') | Out-Null
 
-          & $Installer.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=${ObsRoot}"
-          if ( $LASTEXITCODE -ne 0 ) {
-            throw "Installer exited with code ${LASTEXITCODE}."
+          $InstallerProcess = Start-Process -FilePath $Installer.FullName `
+            -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"${ObsRoot}`"") `
+            -Wait -PassThru
+          if ( $InstallerProcess.ExitCode -ne 0 ) {
+            throw "Installer exited with code $($InstallerProcess.ExitCode)."
           }
 
           $PluginDll = Join-Path $ObsRoot 'obs-plugins/64bit/smart-chroma-key.dll'
@@ -88,9 +90,11 @@ jobs:
           }
 
           $Uninstaller = Get-Item (Join-Path $ObsRoot 'unins*.exe') | Select-Object -First 1
-          & $Uninstaller.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
-          if ( $LASTEXITCODE -ne 0 ) {
-            throw "Uninstaller exited with code ${LASTEXITCODE}."
+          $UninstallerProcess = Start-Process -FilePath $Uninstaller.FullName `
+            -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') `
+            -Wait -PassThru
+          if ( $UninstallerProcess.ExitCode -ne 0 ) {
+            throw "Uninstaller exited with code $($UninstallerProcess.ExitCode)."
           }
           if ( Test-Path $PluginDll -or Test-Path $PluginEffect ) {
             throw 'Uninstaller left plugin files behind.'
