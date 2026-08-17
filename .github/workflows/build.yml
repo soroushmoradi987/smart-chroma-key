@@ -96,7 +96,7 @@ jobs:
           if ( $UninstallerProcess.ExitCode -ne 0 ) {
             throw "Uninstaller exited with code $($UninstallerProcess.ExitCode)."
           }
-          if ( Test-Path $PluginDll -or Test-Path $PluginEffect ) {
+          if ( ( Test-Path $PluginDll ) -or ( Test-Path $PluginEffect ) ) {
             throw 'Uninstaller left plugin files behind.'
           }
 
