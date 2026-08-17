@@ -1,5 +1,5 @@
 /*
-Smart Chroma Key - Professional Green Screen Removal Plugin for OBS
+Smart Chroma Key - Professional Green and Blue Screen Removal Plugin for OBS
 Copyright (C) 2026 Soroush Moradi
 */
 
@@ -13,11 +13,45 @@ Copyright (C) 2026 Soroush Moradi
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
 
+enum smart_chroma_screen_type {
+	SMART_CHROMA_SCREEN_GREEN = 0,
+	SMART_CHROMA_SCREEN_BLUE = 1,
+};
+
+struct smart_chroma_effect_params {
+	gs_eparam_t *texel_size;
+	gs_eparam_t *screen_type;
+	gs_eparam_t *key_color;
+	gs_eparam_t *base_key;
+	gs_eparam_t *edge_softness;
+	gs_eparam_t *background_clean;
+	gs_eparam_t *hair_detail;
+	gs_eparam_t *hair_softness;
+	gs_eparam_t *edge_blur;
+	gs_eparam_t *edge_shrink;
+	gs_eparam_t *edge_grow;
+	gs_eparam_t *hair_color;
+	gs_eparam_t *spill_reduction;
+	gs_eparam_t *despill_light;
+	gs_eparam_t *despill_dark;
+	gs_eparam_t *color_inject_strength;
+	gs_eparam_t *brightness;
+	gs_eparam_t *contrast;
+	gs_eparam_t *saturation;
+	gs_eparam_t *gamma;
+	gs_eparam_t *temperature;
+	gs_eparam_t *tint;
+	gs_eparam_t *key_sat_boost;
+	gs_eparam_t *opacity;
+};
+
 struct smart_chroma_data {
 	obs_source_t *context;
 	gs_effect_t *effect;
+	struct smart_chroma_effect_params params;
 
 	/* Chroma Key */
+	int screen_type;
 	struct vec4 key_color;
 	float base_key;
 	float edge_softness;
@@ -61,6 +95,56 @@ struct smart_chroma_data {
 	uint32_t at_height;
 };
 
+static bool smart_chroma_cache_effect_params(struct smart_chroma_data *f)
+{
+	bool valid = true;
+
+#define CACHE_EFFECT_PARAM(field, name)                                      \
+	do {                                                                   \
+		f->params.field =                                              \
+			gs_effect_get_param_by_name(f->effect, name);             \
+		if (!f->params.field) {                                         \
+			obs_log(LOG_ERROR, "Effect parameter '%s' is missing",    \
+				name);                                             \
+			valid = false;                                              \
+		}                                                              \
+	} while (false)
+
+	CACHE_EFFECT_PARAM(texel_size, "texel_size");
+	CACHE_EFFECT_PARAM(screen_type, "ScreenType");
+	CACHE_EFFECT_PARAM(key_color, "KeyColor");
+	CACHE_EFFECT_PARAM(base_key, "BaseKey");
+	CACHE_EFFECT_PARAM(edge_softness, "EdgeSoftness");
+	CACHE_EFFECT_PARAM(background_clean, "BackgroundClean");
+	CACHE_EFFECT_PARAM(hair_detail, "HairDetail");
+	CACHE_EFFECT_PARAM(hair_softness, "HairSoftness");
+	CACHE_EFFECT_PARAM(edge_blur, "EdgeBlur");
+	CACHE_EFFECT_PARAM(edge_shrink, "EdgeShrink");
+	CACHE_EFFECT_PARAM(edge_grow, "EdgeGrow");
+	CACHE_EFFECT_PARAM(hair_color, "HairColor");
+	CACHE_EFFECT_PARAM(spill_reduction, "SpillReduction");
+	CACHE_EFFECT_PARAM(despill_light, "DespillLight");
+	CACHE_EFFECT_PARAM(despill_dark, "DespillDark");
+	CACHE_EFFECT_PARAM(color_inject_strength, "ColorInjectStrength");
+	CACHE_EFFECT_PARAM(brightness, "Brightness");
+	CACHE_EFFECT_PARAM(contrast, "Contrast");
+	CACHE_EFFECT_PARAM(saturation, "Saturation");
+	CACHE_EFFECT_PARAM(gamma, "Gamma");
+	CACHE_EFFECT_PARAM(temperature, "Temperature");
+	CACHE_EFFECT_PARAM(tint, "Tint");
+	CACHE_EFFECT_PARAM(key_sat_boost, "KeySatBoost");
+	CACHE_EFFECT_PARAM(opacity, "Opacity");
+
+#undef CACHE_EFFECT_PARAM
+
+	return valid;
+}
+
+static float screen_difference(float r, float g, float b, int screen_type)
+{
+	return screen_type == SMART_CHROMA_SCREEN_BLUE ? b - fmaxf(r, g) : g - fmaxf(r, b);
+}
+
 static const char *smart_chroma_name(void *unused)
 {
 	UNUSED_PARAMETER(unused);
@@ -70,58 +154,49 @@ static const char *smart_chroma_name(void *unused)
 static void smart_chroma_update(void *data, obs_data_t *settings)
 {
 	struct smart_chroma_data *f = data;
+	int screen_type = (int)obs_data_get_int(settings, "screen_type");
+	f->screen_type = screen_type == SMART_CHROMA_SCREEN_BLUE ? SMART_CHROMA_SCREEN_BLUE : SMART_CHROMA_SCREEN_GREEN;
 
 	uint32_t kc = (uint32_t)obs_data_get_int(settings, "key_color");
 	vec4_from_rgba(&f->key_color, kc);
 	f->base_key = (float)obs_data_get_double(settings, "base_key");
-	f->edge_softness =
-		(float)obs_data_get_double(settings, "edge_softness");
-	f->background_clean =
-		(float)obs_data_get_double(settings, "background_clean");
+	f->edge_softness = fmaxf((float)obs_data_get_double(settings, "edge_softness"), 0.001f);
+	f->background_clean = fminf(fmaxf((float)obs_data_get_double(settings, "background_clean"), 0.0f), 0.999f);
 
-	f->hair_detail =
-		(float)obs_data_get_double(settings, "hair_detail");
-	f->hair_softness =
-		(float)obs_data_get_double(settings, "hair_softness");
+	f->hair_detail = (float)obs_data_get_double(settings, "hair_detail");
+	f->hair_softness = (float)obs_data_get_double(settings, "hair_softness");
 
 	f->edge_blur = (float)obs_data_get_double(settings, "edge_blur");
-	f->edge_shrink = (float)obs_data_get_double(settings, "edge_shrink");
-	f->edge_grow = (float)obs_data_get_double(settings, "edge_grow");
+	f->edge_shrink = fminf(fmaxf((float)obs_data_get_double(settings, "edge_shrink"), 0.0f), 0.999f);
+	f->edge_grow = fminf(fmaxf((float)obs_data_get_double(settings, "edge_grow"), 0.0f), 0.999f);
 
 	uint32_t hc = (uint32_t)obs_data_get_int(settings, "hair_color");
 	vec4_from_rgba(&f->hair_color, hc);
-	f->spill_reduction =
-		(float)obs_data_get_double(settings, "spill_reduction");
-	f->despill_light =
-		(float)obs_data_get_double(settings, "despill_light");
-	f->despill_dark =
-		(float)obs_data_get_double(settings, "despill_dark");
-	f->color_inject_strength =
-		(float)obs_data_get_double(settings, "color_inject_strength");
+	f->spill_reduction = (float)obs_data_get_double(settings, "spill_reduction");
+	f->despill_light = (float)obs_data_get_double(settings, "despill_light");
+	f->despill_dark = (float)obs_data_get_double(settings, "despill_dark");
+	f->color_inject_strength = (float)obs_data_get_double(settings, "color_inject_strength");
 
 	f->brightness = (float)obs_data_get_double(settings, "brightness");
 	f->contrast = (float)obs_data_get_double(settings, "contrast");
 	f->saturation = (float)obs_data_get_double(settings, "saturation");
-	f->gamma = (float)obs_data_get_double(settings, "gamma");
+	f->gamma = fmaxf((float)obs_data_get_double(settings, "gamma"), 0.1f);
 	f->temperature = (float)obs_data_get_double(settings, "temperature");
 	f->tint = (float)obs_data_get_double(settings, "tint");
 
-	f->key_sat_boost =
-		(float)obs_data_get_double(settings, "key_sat_boost");
+	f->key_sat_boost = (float)obs_data_get_double(settings, "key_sat_boost");
 
-	f->opacity = (float)obs_data_get_double(settings, "opacity");
+	f->opacity = fminf(fmaxf((float)obs_data_get_double(settings, "opacity"), 0.0f), 1.0f);
 }
 
 static void *smart_chroma_create(obs_data_t *settings, obs_source_t *context)
 {
-	struct smart_chroma_data *f =
-		bzalloc(sizeof(struct smart_chroma_data));
+	struct smart_chroma_data *f = bzalloc(sizeof(struct smart_chroma_data));
 	f->context = context;
 
 	char *path = obs_module_file("smart-chroma-key.effect");
 	if (!path) {
-		obs_log(LOG_ERROR,
-			"Could not locate 'smart-chroma-key.effect' in plugin data directory");
+		obs_log(LOG_ERROR, "Could not locate 'smart-chroma-key.effect' in plugin data directory");
 	} else {
 		obs_log(LOG_INFO, "Loading effect from: %s", path);
 	}
@@ -129,6 +204,10 @@ static void *smart_chroma_create(obs_data_t *settings, obs_source_t *context)
 	obs_enter_graphics();
 	f->effect = path ? gs_effect_create_from_file(path, NULL) : NULL;
 	f->texrender = gs_texrender_create(GS_RGBA, 1);
+	if (f->effect && !smart_chroma_cache_effect_params(f)) {
+		gs_effect_destroy(f->effect);
+		f->effect = NULL;
+	}
 	obs_leave_graphics();
 	bfree(path);
 
@@ -159,7 +238,7 @@ static void smart_chroma_destroy(void *data)
 static void auto_tune_phase1(struct smart_chroma_data *f)
 {
 	obs_source_t *target = obs_filter_get_target(f->context);
-	if (!target) {
+	if (!target || !f->texrender) {
 		f->auto_tune_phase = 0;
 		return;
 	}
@@ -238,21 +317,32 @@ static void auto_tune_phase2(struct smart_chroma_data *f)
 
 	/* Sample 9 points around the borders (corners + edge midpoints) */
 	float avg_r = 0.0f, avg_g = 0.0f, avg_b = 0.0f;
+	float keyed_r = 0.0f, keyed_g = 0.0f, keyed_b = 0.0f;
+	float keyed_weight = 0.0f;
 	int count = 0;
 	uint32_t mx = w / 20; /* 5% margin */
 	uint32_t my = h / 20;
 
 	/* 9 sample positions: 4 corners + 4 edge midpoints + 1 top-center */
 	uint32_t sx[9], sy[9];
-	sx[0] = mx;       sy[0] = my;        /* top-left */
-	sx[1] = w / 2;    sy[1] = my;        /* top-center */
-	sx[2] = w - mx;   sy[2] = my;        /* top-right */
-	sx[3] = mx;       sy[3] = h / 2;     /* mid-left */
-	sx[4] = w - mx;   sy[4] = h / 2;     /* mid-right */
-	sx[5] = mx;       sy[5] = h - my;    /* bottom-left */
-	sx[6] = w / 2;    sy[6] = h - my;    /* bottom-center */
-	sx[7] = w - mx;   sy[7] = h - my;    /* bottom-right */
-	sx[8] = w / 4;    sy[8] = my;        /* quarter-top */
+	sx[0] = mx;
+	sy[0] = my; /* top-left */
+	sx[1] = w / 2;
+	sy[1] = my; /* top-center */
+	sx[2] = w - 1 - mx;
+	sy[2] = my; /* top-right */
+	sx[3] = mx;
+	sy[3] = h / 2; /* mid-left */
+	sx[4] = w - 1 - mx;
+	sy[4] = h / 2; /* mid-right */
+	sx[5] = mx;
+	sy[5] = h - 1 - my; /* bottom-left */
+	sx[6] = w / 2;
+	sy[6] = h - 1 - my; /* bottom-center */
+	sx[7] = w - 1 - mx;
+	sy[7] = h - 1 - my; /* bottom-right */
+	sx[8] = w / 4;
+	sy[8] = my; /* quarter-top */
 
 	for (int i = 0; i < 9; i++) {
 		/* Sample 5x5 block around each point */
@@ -262,11 +352,21 @@ static void auto_tune_phase2(struct smart_chroma_data *f)
 				uint32_t py = sy[i] + dy;
 				if (px >= w || py >= h)
 					continue;
-				uint8_t *p =
-					video_data + py * linesize + px * 4;
-				avg_r += p[0] / 255.0f;
-				avg_g += p[1] / 255.0f;
-				avg_b += p[2] / 255.0f;
+				uint8_t *p = video_data + py * linesize + px * 4;
+				float r = p[0] / 255.0f;
+				float g = p[1] / 255.0f;
+				float b = p[2] / 255.0f;
+				float difference = screen_difference(r, g, b, f->screen_type);
+				avg_r += r;
+				avg_g += g;
+				avg_b += b;
+				if (difference > 0.0f) {
+					float weight = difference * difference;
+					keyed_r += r * weight;
+					keyed_g += g * weight;
+					keyed_b += b * weight;
+					keyed_weight += weight;
+				}
 				count++;
 			}
 		}
@@ -281,14 +381,21 @@ static void auto_tune_phase2(struct smart_chroma_data *f)
 	avg_r /= count;
 	avg_g /= count;
 	avg_b /= count;
+	if (keyed_weight > 0.001f) {
+		avg_r = keyed_r / keyed_weight;
+		avg_g = keyed_g / keyed_weight;
+		avg_b = keyed_b / keyed_weight;
+	}
 
-	/* Determine dominant channel */
-	float green_diff = avg_g - fmaxf(avg_r, avg_b);
+	float key_difference = screen_difference(avg_r, avg_g, avg_b, f->screen_type);
+	if (key_difference <= 0.01f) {
+		obs_log(LOG_WARNING, "Auto Tune could not find enough %s screen color near the frame borders",
+			f->screen_type == SMART_CHROMA_SCREEN_BLUE ? "blue" : "green");
+		return;
+	}
 
 	/* Set key color (OBS color format: 0xAABBGGRR) */
-	uint32_t key_color = 0xFF000000 |
-			     ((uint32_t)(avg_b * 255.0f) << 16) |
-			     ((uint32_t)(avg_g * 255.0f) << 8) |
+	uint32_t key_color = 0xFF000000 | ((uint32_t)(avg_b * 255.0f) << 16) | ((uint32_t)(avg_g * 255.0f) << 8) |
 			     ((uint32_t)(avg_r * 255.0f));
 
 	obs_data_t *settings = obs_source_get_settings(f->context);
@@ -296,17 +403,9 @@ static void auto_tune_phase2(struct smart_chroma_data *f)
 	obs_data_set_int(settings, "key_color", (long long)key_color);
 
 	/* Auto-tune based on screen characteristics */
-	float auto_base_key = -0.05f - green_diff * 0.2f;
-	if (auto_base_key < -0.3f)
-		auto_base_key = -0.3f;
-
-	float auto_softness = 0.8f + green_diff * 0.4f;
-	if (auto_softness > 1.0f)
-		auto_softness = 1.0f;
-
-	float auto_sat_boost = 1.0f + (1.0f - green_diff) * 0.8f;
-	if (auto_sat_boost > 3.0f)
-		auto_sat_boost = 3.0f;
+	float auto_base_key = fmaxf(0.005f, key_difference * 0.08f);
+	float auto_softness = fminf(0.85f, fmaxf(0.04f, key_difference * 0.7f));
+	float auto_sat_boost = fminf(3.0f, 1.0f + (1.0f - key_difference) * 0.8f);
 
 	obs_data_set_double(settings, "base_key", (double)auto_base_key);
 	obs_data_set_double(settings, "edge_softness", (double)auto_softness);
@@ -333,13 +432,23 @@ static void auto_tune_phase2(struct smart_chroma_data *f)
 	obs_data_release(settings);
 }
 
-static bool auto_tune_clicked(obs_properties_t *props,
-			       obs_property_t *property, void *data)
+static bool auto_tune_clicked(obs_properties_t *props, obs_property_t *property, void *data)
 {
 	UNUSED_PARAMETER(props);
 	UNUSED_PARAMETER(property);
 	struct smart_chroma_data *f = data;
 	f->auto_tune_phase = 1;
+	return true;
+}
+
+static bool screen_type_modified(obs_properties_t *props, obs_property_t *property, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(props);
+	UNUSED_PARAMETER(property);
+
+	int screen_type = (int)obs_data_get_int(settings, "screen_type");
+	uint32_t key_color = screen_type == SMART_CHROMA_SCREEN_BLUE ? 0xFFFF0000 : 0xFF00FF00;
+	obs_data_set_int(settings, "key_color", (long long)key_color);
 	return true;
 }
 
@@ -349,73 +458,56 @@ static obs_properties_t *smart_chroma_properties(void *data)
 	obs_properties_t *p = obs_properties_create();
 
 	/* --- Auto Tune Button --- */
-	obs_properties_add_button(p, "auto_tune",
-				  obs_module_text("AutoTune"),
-				  auto_tune_clicked);
+	obs_properties_add_button(p, "auto_tune", obs_module_text("AutoTune"), auto_tune_clicked);
 
 	/* --- Chroma Key --- */
-	obs_properties_add_color(p, "key_color",
-				 obs_module_text("KeyColor"));
-	obs_properties_add_float_slider(p, "base_key",
-		obs_module_text("BaseKey"), -0.5, 1.0, 0.001);
-	obs_properties_add_float_slider(p, "edge_softness",
-		obs_module_text("EdgeSoftness"), 0.001, 1.0, 0.001);
-	obs_properties_add_float_slider(p, "background_clean",
-		obs_module_text("BackgroundClean"), 0.0, 1.0, 0.001);
+	obs_property_t *screen_type = obs_properties_add_list(p, "screen_type", obs_module_text("ScreenType"),
+							      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(screen_type, obs_module_text("GreenScreen"), SMART_CHROMA_SCREEN_GREEN);
+	obs_property_list_add_int(screen_type, obs_module_text("BlueScreen"), SMART_CHROMA_SCREEN_BLUE);
+	obs_property_set_modified_callback(screen_type, screen_type_modified);
+	obs_properties_add_color(p, "key_color", obs_module_text("KeyColor"));
+	obs_properties_add_float_slider(p, "base_key", obs_module_text("BaseKey"), -0.5, 1.0, 0.001);
+	obs_properties_add_float_slider(p, "edge_softness", obs_module_text("EdgeSoftness"), 0.001, 1.0, 0.001);
+	obs_properties_add_float_slider(p, "background_clean", obs_module_text("BackgroundClean"), 0.0, 1.0, 0.001);
 
 	/* --- Hair Detail --- */
-	obs_properties_add_float_slider(p, "hair_detail",
-		obs_module_text("HairDetail"), 0.0, 1.0, 0.01);
-	obs_properties_add_float_slider(p, "hair_softness",
-		obs_module_text("HairSoftness"), 0.0, 1.0, 0.01);
+	obs_properties_add_float_slider(p, "hair_detail", obs_module_text("HairDetail"), 0.0, 1.0, 0.01);
+	obs_properties_add_float_slider(p, "hair_softness", obs_module_text("HairSoftness"), 0.0, 1.0, 0.01);
 
 	/* --- Edge Refinement --- */
-	obs_properties_add_float_slider(p, "edge_blur",
-		obs_module_text("EdgeBlur"), 0.0, 5.0, 0.1);
-	obs_properties_add_float_slider(p, "edge_shrink",
-		obs_module_text("EdgeShrink"), 0.0, 1.0, 0.01);
-	obs_properties_add_float_slider(p, "edge_grow",
-		obs_module_text("EdgeGrow"), 0.0, 1.0, 0.01);
+	obs_properties_add_float_slider(p, "edge_blur", obs_module_text("EdgeBlur"), 0.0, 5.0, 0.1);
+	obs_properties_add_float_slider(p, "edge_shrink", obs_module_text("EdgeShrink"), 0.0, 1.0, 0.01);
+	obs_properties_add_float_slider(p, "edge_grow", obs_module_text("EdgeGrow"), 0.0, 1.0, 0.01);
 
 	/* --- Despill & Hair --- */
-	obs_properties_add_color(p, "hair_color",
-				 obs_module_text("HairColor"));
-	obs_properties_add_float_slider(p, "spill_reduction",
-		obs_module_text("SpillReduction"), 0.0, 2.0, 0.01);
-	obs_properties_add_float_slider(p, "despill_light",
-		obs_module_text("DespillLight"), 0.0, 2.0, 0.01);
-	obs_properties_add_float_slider(p, "despill_dark",
-		obs_module_text("DespillDark"), 0.0, 2.0, 0.01);
-	obs_properties_add_float_slider(p, "color_inject_strength",
-		obs_module_text("ColorInjectStrength"), 0.0, 5.0, 0.01);
+	obs_properties_add_color(p, "hair_color", obs_module_text("HairColor"));
+	obs_properties_add_float_slider(p, "spill_reduction", obs_module_text("SpillReduction"), 0.0, 2.0, 0.01);
+	obs_properties_add_float_slider(p, "despill_light", obs_module_text("DespillLight"), 0.0, 2.0, 0.01);
+	obs_properties_add_float_slider(p, "despill_dark", obs_module_text("DespillDark"), 0.0, 2.0, 0.01);
+	obs_properties_add_float_slider(p, "color_inject_strength", obs_module_text("ColorInjectStrength"), 0.0, 5.0,
+					0.01);
 
 	/* --- Color Correction --- */
-	obs_properties_add_float_slider(p, "brightness",
-		obs_module_text("Brightness"), -1.0, 1.0, 0.01);
-	obs_properties_add_float_slider(p, "contrast",
-		obs_module_text("Contrast"), 0.0, 3.0, 0.01);
-	obs_properties_add_float_slider(p, "saturation",
-		obs_module_text("Saturation"), 0.0, 3.0, 0.01);
-	obs_properties_add_float_slider(p, "gamma",
-		obs_module_text("Gamma"), 0.1, 3.0, 0.01);
-	obs_properties_add_float_slider(p, "temperature",
-		obs_module_text("Temperature"), -1.0, 1.0, 0.01);
-	obs_properties_add_float_slider(p, "tint",
-		obs_module_text("Tint"), -1.0, 1.0, 0.01);
+	obs_properties_add_float_slider(p, "brightness", obs_module_text("Brightness"), -1.0, 1.0, 0.01);
+	obs_properties_add_float_slider(p, "contrast", obs_module_text("Contrast"), 0.0, 3.0, 0.01);
+	obs_properties_add_float_slider(p, "saturation", obs_module_text("Saturation"), 0.0, 3.0, 0.01);
+	obs_properties_add_float_slider(p, "gamma", obs_module_text("Gamma"), 0.1, 3.0, 0.01);
+	obs_properties_add_float_slider(p, "temperature", obs_module_text("Temperature"), -1.0, 1.0, 0.01);
+	obs_properties_add_float_slider(p, "tint", obs_module_text("Tint"), -1.0, 1.0, 0.01);
 
 	/* --- Key Processing --- */
-	obs_properties_add_float_slider(p, "key_sat_boost",
-		obs_module_text("KeySatBoost"), 1.0, 5.0, 0.01);
+	obs_properties_add_float_slider(p, "key_sat_boost", obs_module_text("KeySatBoost"), 1.0, 5.0, 0.01);
 
 	/* --- Opacity --- */
-	obs_properties_add_float_slider(p, "opacity",
-		obs_module_text("Opacity"), 0.0, 1.0, 0.01);
+	obs_properties_add_float_slider(p, "opacity", obs_module_text("Opacity"), 0.0, 1.0, 0.01);
 
 	return p;
 }
 
 static void smart_chroma_defaults(obs_data_t *s)
 {
+	obs_data_set_default_int(s, "screen_type", SMART_CHROMA_SCREEN_GREEN);
 	obs_data_set_default_int(s, "key_color", 0xFF00FF00);
 	obs_data_set_default_double(s, "base_key", 0.0);
 	obs_data_set_default_double(s, "edge_softness", 0.05);
@@ -464,91 +556,46 @@ static void smart_chroma_render(void *data, gs_effect_t *effect)
 		auto_tune_phase2(f);
 	}
 
-	if (!obs_source_process_filter_begin(f->context, GS_RGBA,
-					     OBS_ALLOW_DIRECT_RENDERING))
+	obs_source_t *target = obs_filter_get_target(f->context);
+	if (!target) {
+		obs_source_skip_video_filter(f->context);
+		return;
+	}
+
+	if (!obs_source_process_filter_begin(f->context, GS_RGBA, OBS_ALLOW_DIRECT_RENDERING))
 		return;
 
 	/* Compute texel size */
-	obs_source_t *target = obs_filter_get_target(f->context);
 	uint32_t tw = obs_source_get_base_width(target);
 	uint32_t th = obs_source_get_base_height(target);
 	struct vec2 ts;
 	ts.x = (tw > 0) ? 1.0f / (float)tw : 0.0f;
 	ts.y = (th > 0) ? 1.0f / (float)th : 0.0f;
 
-	gs_effect_set_vec2(
-		gs_effect_get_param_by_name(f->effect, "texel_size"), &ts);
-
-	gs_effect_set_vec4(
-		gs_effect_get_param_by_name(f->effect, "KeyColor"),
-		&f->key_color);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "BaseKey"),
-		f->base_key);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "EdgeSoftness"),
-		f->edge_softness);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "BackgroundClean"),
-		f->background_clean);
-
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "HairDetail"),
-		f->hair_detail);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "HairSoftness"),
-		f->hair_softness);
-
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "EdgeBlur"),
-		f->edge_blur);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "EdgeShrink"),
-		f->edge_shrink);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "EdgeGrow"),
-		f->edge_grow);
-
-	gs_effect_set_vec4(
-		gs_effect_get_param_by_name(f->effect, "HairColor"),
-		&f->hair_color);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "SpillReduction"),
-		f->spill_reduction);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "DespillLight"),
-		f->despill_light);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "DespillDark"),
-		f->despill_dark);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "ColorInjectStrength"),
-		f->color_inject_strength);
-
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "Brightness"),
-		f->brightness);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "Contrast"),
-		f->contrast);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "Saturation"),
-		f->saturation);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "Gamma"), f->gamma);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "Temperature"),
-		f->temperature);
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "Tint"), f->tint);
-
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "KeySatBoost"),
-		f->key_sat_boost);
-
-	gs_effect_set_float(
-		gs_effect_get_param_by_name(f->effect, "Opacity"),
-		f->opacity);
+	gs_effect_set_vec2(f->params.texel_size, &ts);
+	gs_effect_set_int(f->params.screen_type, f->screen_type);
+	gs_effect_set_vec4(f->params.key_color, &f->key_color);
+	gs_effect_set_float(f->params.base_key, f->base_key);
+	gs_effect_set_float(f->params.edge_softness, f->edge_softness);
+	gs_effect_set_float(f->params.background_clean, f->background_clean);
+	gs_effect_set_float(f->params.hair_detail, f->hair_detail);
+	gs_effect_set_float(f->params.hair_softness, f->hair_softness);
+	gs_effect_set_float(f->params.edge_blur, f->edge_blur);
+	gs_effect_set_float(f->params.edge_shrink, f->edge_shrink);
+	gs_effect_set_float(f->params.edge_grow, f->edge_grow);
+	gs_effect_set_vec4(f->params.hair_color, &f->hair_color);
+	gs_effect_set_float(f->params.spill_reduction, f->spill_reduction);
+	gs_effect_set_float(f->params.despill_light, f->despill_light);
+	gs_effect_set_float(f->params.despill_dark, f->despill_dark);
+	gs_effect_set_float(f->params.color_inject_strength, f->color_inject_strength);
+	gs_effect_set_float(f->params.brightness, f->brightness);
+	gs_effect_set_float(f->params.contrast, f->contrast);
+	gs_effect_set_float(f->params.saturation, f->saturation);
+	gs_effect_set_float(f->params.gamma, f->gamma);
+	gs_effect_set_float(f->params.temperature, f->temperature);
+	gs_effect_set_float(f->params.tint, f->tint);
+	gs_effect_set_float(f->params.key_sat_boost, f->key_sat_boost);
+	gs_effect_set_float(f->params.opacity, f->opacity);
 
 	obs_source_process_filter_end(f->context, f->effect, 0, 0);
 }
@@ -569,8 +616,7 @@ static struct obs_source_info smart_chroma_key_filter = {
 bool obs_module_load(void)
 {
 	obs_register_source(&smart_chroma_key_filter);
-	obs_log(LOG_INFO, "plugin loaded successfully (version %s)",
-		PLUGIN_VERSION);
+	obs_log(LOG_INFO, "plugin loaded successfully (version %s)", PLUGIN_VERSION);
 	return true;
 }
 

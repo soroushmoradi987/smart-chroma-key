@@ -14,6 +14,7 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
+AppComments=Professional green and blue screen removal for OBS Studio
 DefaultDirName={autopf64}\obs-studio
 DefaultGroupName={#MyAppName}
 LicenseFile="@LICENSE_FILE@"
@@ -25,9 +26,17 @@ PrivilegesRequired=admin
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+DisableWelcomePage=no
 DisableProgramGroupPage=yes
 SetupLogging=yes
 UninstallDisplayName={#MyAppName}
+UninstallDisplayIcon={app}\bin\64bit\obs64.exe
+CloseApplications=yes
+CloseApplicationsFilter=obs64.exe
+RestartApplications=no
+VersionInfoDescription={#MyAppName} Setup
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -35,6 +44,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Files]
 Source: "@STAGING_DIR@\\plugin\\bin\\64bit\\@PRODUCT_NAME@.dll"; DestDir: "{app}\\obs-plugins\\64bit"; Flags: ignoreversion
 Source: "@STAGING_DIR@\\plugin\\data\\*"; DestDir: "{commonappdata}\\obs-studio\\plugins\\@PRODUCT_NAME@\\data"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Run]
+Filename: "{app}\bin\64bit\obs64.exe"; Description: "Launch OBS Studio"; Flags: postinstall nowait skipifsilent runasoriginaluser unchecked
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{commonappdata}\\obs-studio\\plugins\\@PRODUCT_NAME@\\data"

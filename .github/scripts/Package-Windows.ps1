@@ -132,6 +132,19 @@ function Package {
     Log-Group "Building ${ProductName} installer..."
     Invoke-External $IsccCommand.Source '/Qp' $InstallerScriptPath
     Log-Group
+
+    $InstallerPath = Join-Path $ProjectRoot "release/${OutputInstallerName}.exe"
+    if ( ! ( Test-Path $InstallerPath -PathType Leaf ) ) {
+        throw "Installer was not created at ${InstallerPath}."
+    }
+
+    $InstallerFile = Get-Item $InstallerPath
+    if ( $InstallerFile.Length -le 0 ) {
+        throw "Installer is empty at ${InstallerPath}."
+    }
+
+    $InstallerHash = Get-FileHash -Algorithm SHA256 -Path $InstallerPath
+    Write-Information "Created $($InstallerFile.Name) ($($InstallerFile.Length) bytes, SHA-256 $($InstallerHash.Hash))"
 }
 
 Package

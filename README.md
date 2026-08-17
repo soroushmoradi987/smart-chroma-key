@@ -1,31 +1,35 @@
-# Smart Chroma Key - Professional Green Screen Removal for OBS Studio
+# Smart Chroma Key - Professional Green & Blue Screen Removal for OBS Studio
 
-A professional chroma key (green screen removal) plugin for OBS Studio with advanced features for clean, broadcast-quality keying.
+A professional chroma key plugin for OBS Studio with dedicated green-screen and blue-screen processing, advanced edge recovery, and broadcast-quality controls.
 
 ## Features
 
-- **Intelligent Auto-Tune**: One-click automatic calibration — samples your green screen from frame borders and sets optimal parameters
+- **Intelligent Auto-Tune**: One-click automatic calibration — samples the selected screen color from frame borders and sets optimal parameters
+- **Green + Blue Screen Modes**: Channel-aware keying, hair recovery, and despill for either screen color
 - **Advanced Hair Recovery**: 8-neighbor structure analysis + screen subtraction (Ultimatte-style) preserves thin hair strands
-- **Dual Despill System**: Removes green spill from skin and edges using two complementary methods
+- **Dual Despill System**: Removes green or blue spill from skin and edges using two complementary methods
 - **5×5 Gaussian Alpha Blur**: Smooth, natural-looking edges
 - **Full Color Correction**: Brightness, contrast, saturation, gamma, temperature, and tint controls
 - **Key Saturation Boost**: Boosts saturation only for keying computation, improving detection without affecting output
+- **Optimized Rendering**: Cached GPU parameter handles and a fast path that skips neighbor sampling when hair recovery is disabled
 
 ## Installation
 
 ### macOS
-1. Download `smart-chroma-key-macos.zip` from [Releases](../../releases)
-2. Extract and copy `smart-chroma-key.plugin` to:
+1. Download `smart-chroma-key-<version>-macos-universal.pkg` from [Releases](../../releases).
+2. Close OBS Studio and run the graphical installer wizard.
+3. Restart OBS Studio.
+
+For manual or portable installation, download `smart-chroma-key-macos.zip`, extract it, and copy `smart-chroma-key.plugin` to:
    ```
    ~/Library/Application Support/obs-studio/plugins/
    ```
-3. Restart OBS Studio
 
 ### Windows
-1. Download `smart-chroma-key-<version>-windows-x64-installer.exe` from [Releases](../../releases) and run the wizard.
-2. If you prefer manual installation or a portable OBS setup, download `smart-chroma-key-windows.zip` instead.
-3. Extract the `smart-chroma-key` folder.
-4. Copy contents to your OBS plugins directory:
+1. Download `smart-chroma-key-<version>-windows-x64-installer.exe` from [Releases](../../releases).
+2. Close OBS Studio and run the modern installer wizard. It validates the selected OBS folder and includes an uninstaller.
+
+If you prefer manual installation or a portable OBS setup, download `smart-chroma-key-windows.zip`, extract it, and copy its contents to your OBS plugins directory:
    ```
    C:\Program Files\obs-studio\obs-plugins\64bit\smart-chroma-key.dll
    C:\ProgramData\obs-studio\plugins\smart-chroma-key\data\  (effect + locale files)
@@ -33,7 +37,7 @@ A professional chroma key (green screen removal) plugin for OBS Studio with adva
    Or for portable installs, copy to `obs-studio\data\obs-plugins\smart-chroma-key\`
 5. Restart OBS Studio
 
-To build the Windows installer locally on a Windows machine:
+To build the Windows wizard locally on a Windows machine:
 
 ```powershell
 pwsh .github/scripts/Build-Installer-Windows.ps1 -Configuration Release -InstallDependencies
@@ -41,29 +45,34 @@ pwsh .github/scripts/Build-Installer-Windows.ps1 -Configuration Release -Install
 
 The generated files are written to `release/`, including `smart-chroma-key-<version>-windows-x64-installer.exe`.
 
+Unless your release pipeline is configured with trusted signing credentials, locally generated Windows installers are unsigned and may trigger SmartScreen. Public macOS distribution should use a Developer ID Installer certificate and notarization.
+
 ## Usage
 
 1. In OBS, right-click your camera source → **Filters**
 2. Click **+** under Effect Filters → Select **Smart Chroma Key**
-3. Click **Auto Tune** for automatic green screen detection
-4. Fine-tune with sliders if needed:
+3. Select **Green Screen** or **Blue Screen** under **Screen Type**
+4. Click **Smart Auto Tune** to sample the selected screen color from the frame borders
+5. Fine-tune with sliders if needed:
    - **Base Key / Edge Softness**: Core keying threshold and falloff
    - **Hair Detail / Hair Softness**: Recover thin hair strands
-   - **Spill Reduction / Despill Light / Despill Dark**: Remove green color cast
+   - **Spill Reduction / Despill Light / Despill Dark**: Remove green or blue color cast
    - **Edge Blur / Shrink / Grow**: Refine alpha edges
 
 ## Building from Source
 
 ### macOS
 ```bash
-cmake --preset macos
-cmake --build build_macos --config Release
+./scripts/build-macos-installer.zsh Release
 ```
+
+This creates a universal graphical `.pkg` installer and validates that it contains the plugin payload. The lower-level build commands remain `cmake --preset macos` and `cmake --build build_macos --config Release`.
 
 ### Windows
 ```bash
 cmake --preset windows-x64
 cmake --build build_x64 --config Release
+pwsh .github/scripts/Build-Installer-Windows.ps1 -Configuration Release -InstallDependencies
 ```
 
 ## License
@@ -94,7 +103,7 @@ The workflows make use of GitHub repository actions (contained in `.github/actio
 
 ### Retrieving build artifacts
 
-Successful builds on GitHub Actions will produce build artifacts that can be downloaded for testing. These artifacts are commonly simple archives and will not contain package installers or installation programs.
+Successful packaged builds produce both portable archives and graphical installers: a universal `.pkg` on macOS and an Inno Setup `.exe` on Windows. CI inspects the macOS payload and performs a silent install/uninstall smoke test for the Windows wizard before uploading artifacts.
 
 ### Building a Release
 

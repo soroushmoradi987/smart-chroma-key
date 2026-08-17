@@ -160,6 +160,24 @@ jobs:
           codesignUser: ${{ secrets.MACOS_NOTARIZATION_USERNAME }}
           codesignPass: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
 
+      - name: Verify macOS Installer 🔎
+        if: fromJSON(needs.check-event.outputs.package)
+        shell: zsh --no-rcs --errexit --pipefail {0}
+        run: |
+          installer=(release/${{ steps.setup.outputs.pluginName }}-*-macos-universal.pkg(N[1]))
+          if (( ! #installer )) {
+            print -u2 'macOS installer was not created.'
+            exit 1
+          }
+
+          payload="$(pkgutil --payload-files ${installer})"
+          print -r -- ${payload} | grep -F '${{ steps.setup.outputs.pluginName }}.plugin/Contents/MacOS/${{ steps.setup.outputs.pluginName }}'
+          print -r -- ${payload} | grep -F '${{ steps.setup.outputs.pluginName }}.effect'
+          if print -r -- ${payload} | grep -E '/\._|/\.DS_Store|\.dSYM'; then
+            print -u2 'Unexpected metadata or debug symbols in macOS installer.'
+            exit 1
+          fi
+
       - name: Upload Artifacts 📡
         uses: actions/upload-artifact@v4
         with:
@@ -293,6 +311,39 @@ jobs:
           target: x64
           config: ${{ needs.check-event.outputs.config }}
           package: ${{ fromJSON(needs.check-event.outputs.package) }}
+
+      - name: Smoke Test Windows Installer 🔎
+        if: fromJSON(needs.check-event.outputs.package)
+        shell: pwsh
+        run: |
+          $Installer = Get-Item release/*-installer.exe | Select-Object -First 1
+          if ( $null -eq $Installer -or $Installer.Length -le 0 ) {
+            throw 'Windows installer was not created.'
+          }
+
+          $ObsRoot = Join-Path $env:RUNNER_TEMP 'obs-studio'
+          New-Item -ItemType Directory -Force -Path (Join-Path $ObsRoot 'bin/64bit') | Out-Null
+          New-Item -ItemType File -Force -Path (Join-Path $ObsRoot 'bin/64bit/obs64.exe') | Out-Null
+
+          & $Installer.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=${ObsRoot}"
+          if ( $LASTEXITCODE -ne 0 ) {
+            throw "Installer exited with code ${LASTEXITCODE}."
+          }
+
+          $PluginDll = Join-Path $ObsRoot 'obs-plugins/64bit/${{ steps.setup.outputs.pluginName }}.dll'
+          $PluginEffect = Join-Path $env:ProgramData 'obs-studio/plugins/${{ steps.setup.outputs.pluginName }}/data/${{ steps.setup.outputs.pluginName }}.effect'
+          if ( ! ( Test-Path $PluginDll ) -or ! ( Test-Path $PluginEffect ) ) {
+            throw 'Installed plugin payload is incomplete.'
+          }
+
+          $Uninstaller = Get-Item (Join-Path $ObsRoot 'unins*.exe') | Select-Object -First 1
+          & $Uninstaller.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+          if ( $LASTEXITCODE -ne 0 ) {
+            throw "Uninstaller exited with code ${LASTEXITCODE}."
+          }
+          if ( Test-Path $PluginDll -or Test-Path $PluginEffect ) {
+            throw 'Uninstaller left plugin files behind.'
+          }
 
       - name: Upload Artifacts 📡
         uses: actions/upload-artifact@v4

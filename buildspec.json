@@ -33,12 +33,12 @@
     },
     "platformConfig": {
         "macos": {
-            "bundleId": "com.example.smart-chroma-key"
+            "bundleId": "com.dinejahani.smart-chroma-key"
         }
     },
     "name": "smart-chroma-key",
     "displayName": "Smart Chroma Key",
-    "version": "1.0.4",
+    "version": "1.1.0",
     "author": "Soroush Moradi",
     "website": "https://dinejahani.com",
     "email": "info@dinejahani.com"

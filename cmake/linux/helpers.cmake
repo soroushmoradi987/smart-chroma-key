@@ -56,6 +56,7 @@ function(target_install_resources target)
   message(DEBUG "Installing resources for target ${target}...")
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data")
     file(GLOB_RECURSE data_files "${CMAKE_CURRENT_SOURCE_DIR}/data/*")
+    list(FILTER data_files EXCLUDE REGEX "/(\\._[^/]+|\\.DS_Store)$")
     foreach(data_file IN LISTS data_files)
       cmake_path(
         RELATIVE_PATH
@@ -72,6 +73,8 @@ function(target_install_resources target)
       DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/"
       DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/obs/obs-plugins/${target}
       USE_SOURCE_PERMISSIONS
+      PATTERN ".DS_Store" EXCLUDE
+      PATTERN "._*" EXCLUDE
     )
 
     add_custom_command(
