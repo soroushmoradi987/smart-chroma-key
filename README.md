@@ -8,6 +8,8 @@ A professional chroma key plugin for OBS Studio with dedicated green-screen and 
 - **Adaptive Chroma Matte**: Brightness-independent chromaticity matching removes folds and shadows without widening the key into foreground colors
 - **Green + Blue Screen Modes**: Channel-aware keying, hair recovery, and despill for either screen color
 - **Advanced Hair Recovery**: Fractional screen subtraction plus local structure analysis preserves thin and semi-transparent strands
+- **Natural Hair-Color Reconstruction**: Uses confident nearby foreground color instead of leaving green/blue contamination on recovered strands
+- **Motion-Aware Temporal Denoise**: Suppresses flickering matte pixels without trailing moving body edges
 - **Edge Decontamination + Despill**: Reconstructs partial-edge color from nearby screen samples before targeted green/blue spill suppression
 - **Edge-Aware 3×3 Matte Refinement**: Shared GPU samples provide transition-only smoothing and true morphological shrink/grow
 - **Full Color Correction**: Brightness, contrast, saturation, gamma, temperature, and tint controls

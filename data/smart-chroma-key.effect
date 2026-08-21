@@ -1,6 +1,9 @@
 uniform float4x4 ViewProj;
 uniform texture2d image;
+uniform texture2d previous_image;
 uniform float2 texel_size;
+uniform float HistoryValid = 0.0;
+uniform float TemporalStability = 0.72;
 uniform int ScreenType = 0;
 
 // ==========================================
@@ -525,6 +528,8 @@ float4 PSAdaptiveKey(VertData v_in) : TARGET {
     float neighbor_luma_sum = 0.0;
     float3 neighbor_screen_sum = float3(0.0, 0.0, 0.0);
     float neighbor_screen_weight = 0.0;
+    float3 neighbor_foreground_sum = float3(0.0, 0.0, 0.0);
+    float neighbor_foreground_weight = 0.0;
 
     // A shared 3x3 neighborhood drives hair detection, edge-aware blur, and
     // true morphological shrink/grow. This is cheaper than the old 25-tap blur.
@@ -555,15 +560,70 @@ float4 PSAdaptiveKey(VertData v_in) : TARGET {
                                      max(a_top_left, a_top_right)),
                                  max(a_bottom_left, a_bottom_right));
         max_neighbor_alpha = max(max_neighbor_alpha, core_alpha);
+        float surround_max_alpha = max(max(max(max(a_left, a_right), max(a_up, a_down)),
+                                           max(a_top_left, a_top_right)),
+                                       max(a_bottom_left, a_bottom_right));
 
         neighbor_alpha_sum = a_left + a_right + a_up + a_down + a_top_left + a_top_right +
                              a_bottom_left + a_bottom_right;
-        neighbor_screen_sum = left.rgb * (1.0 - a_left) + right.rgb * (1.0 - a_right) +
-                              up.rgb * (1.0 - a_up) + down.rgb * (1.0 - a_down) +
-                              top_left.rgb * (1.0 - a_top_left) + top_right.rgb * (1.0 - a_top_right) +
-                              bottom_left.rgb * (1.0 - a_bottom_left) +
-                              bottom_right.rgb * (1.0 - a_bottom_right);
-        neighbor_screen_weight = 8.0 - neighbor_alpha_sum;
+
+        // Squared screen weights reject partly covered hair pixels from the
+        // local screen estimate. Opaque-neighbor weights provide the actual
+        // foreground hue used to recolor very thin recovered strands.
+        float sw_left = (1.0 - a_left) * (1.0 - a_left);
+        float sw_right = (1.0 - a_right) * (1.0 - a_right);
+        float sw_up = (1.0 - a_up) * (1.0 - a_up);
+        float sw_down = (1.0 - a_down) * (1.0 - a_down);
+        float sw_top_left = (1.0 - a_top_left) * (1.0 - a_top_left);
+        float sw_top_right = (1.0 - a_top_right) * (1.0 - a_top_right);
+        float sw_bottom_left = (1.0 - a_bottom_left) * (1.0 - a_bottom_left);
+        float sw_bottom_right = (1.0 - a_bottom_right) * (1.0 - a_bottom_right);
+        neighbor_screen_sum = left.rgb * sw_left + right.rgb * sw_right + up.rgb * sw_up +
+                              down.rgb * sw_down + top_left.rgb * sw_top_left +
+                              top_right.rgb * sw_top_right + bottom_left.rgb * sw_bottom_left +
+                              bottom_right.rgb * sw_bottom_right;
+        neighbor_screen_weight = sw_left + sw_right + sw_up + sw_down + sw_top_left +
+                                 sw_top_right + sw_bottom_left + sw_bottom_right;
+
+        float fw_left = smoothstep(0.42, 0.92, a_left);
+        float fw_right = smoothstep(0.42, 0.92, a_right);
+        float fw_up = smoothstep(0.42, 0.92, a_up);
+        float fw_down = smoothstep(0.42, 0.92, a_down);
+        float fw_top_left = smoothstep(0.42, 0.92, a_top_left);
+        float fw_top_right = smoothstep(0.42, 0.92, a_top_right);
+        float fw_bottom_left = smoothstep(0.42, 0.92, a_bottom_left);
+        float fw_bottom_right = smoothstep(0.42, 0.92, a_bottom_right);
+        float neighbor_key_difference = max(screen_difference(KeyColor.rgb), 0.02);
+        fw_left *= smoothstep(0.55, 0.92,
+                              1.0 - saturate(screen_difference(left.rgb) / neighbor_key_difference));
+        fw_right *= smoothstep(0.55, 0.92,
+                               1.0 - saturate(screen_difference(right.rgb) / neighbor_key_difference));
+        fw_up *= smoothstep(0.55, 0.92,
+                            1.0 - saturate(screen_difference(up.rgb) / neighbor_key_difference));
+        fw_down *= smoothstep(0.55, 0.92,
+                              1.0 - saturate(screen_difference(down.rgb) / neighbor_key_difference));
+        fw_top_left *= smoothstep(0.55, 0.92,
+                                  1.0 - saturate(screen_difference(top_left.rgb) / neighbor_key_difference));
+        fw_top_right *= smoothstep(0.55, 0.92,
+                                   1.0 - saturate(screen_difference(top_right.rgb) / neighbor_key_difference));
+        fw_bottom_left *= smoothstep(0.55, 0.92,
+                                     1.0 - saturate(screen_difference(bottom_left.rgb) / neighbor_key_difference));
+        fw_bottom_right *= smoothstep(0.55, 0.92,
+                                      1.0 - saturate(screen_difference(bottom_right.rgb) / neighbor_key_difference));
+        fw_left *= fw_left;
+        fw_right *= fw_right;
+        fw_up *= fw_up;
+        fw_down *= fw_down;
+        fw_top_left *= fw_top_left;
+        fw_top_right *= fw_top_right;
+        fw_bottom_left *= fw_bottom_left;
+        fw_bottom_right *= fw_bottom_right;
+        neighbor_foreground_sum = left.rgb * fw_left + right.rgb * fw_right + up.rgb * fw_up +
+                                  down.rgb * fw_down + top_left.rgb * fw_top_left +
+                                  top_right.rgb * fw_top_right + bottom_left.rgb * fw_bottom_left +
+                                  bottom_right.rgb * fw_bottom_right;
+        neighbor_foreground_weight = fw_left + fw_right + fw_up + fw_down + fw_top_left +
+                                     fw_top_right + fw_bottom_left + fw_bottom_right;
         gaussian_alpha += (a_left + a_right + a_up + a_down) * 2.0;
         gaussian_alpha += a_top_left + a_top_right + a_bottom_left + a_bottom_right;
         gaussian_alpha *= 0.0625;
@@ -577,12 +637,53 @@ float4 PSAdaptiveKey(VertData v_in) : TARGET {
                             dot(bottom_left.rgb, float3(0.2126, 0.7152, 0.0722)) +
                             dot(bottom_right.rgb, float3(0.2126, 0.7152, 0.0722));
 
+        float support_horizontal = min(a_left, a_right);
+        float support_vertical = min(a_up, a_down);
+        float support_diagonal_a = min(a_top_left, a_bottom_right);
+        float support_diagonal_b = min(a_top_right, a_bottom_left);
+        float directional_alpha_support = max(max(support_horizontal, support_vertical),
+                                              max(support_diagonal_a, support_diagonal_b));
+
+        // Reduce isolated low-alpha sensor/compression noise. Coherent hair is
+        // restored below, so this does not soften the already-clean body edge.
+        float likely_background = 1.0 - smoothstep(0.16, 0.52, surround_max_alpha);
+        float isolated_excess = max(core_alpha - neighbor_alpha_sum * 0.125, 0.0);
+        float isolated_noise = smoothstep(0.035, 0.24, isolated_excess) *
+                               (1.0 - smoothstep(0.008, 0.12, directional_alpha_support)) *
+                               (1.0 - smoothstep(0.18, 0.68, surround_max_alpha));
+        float spatial_denoise = max(likely_background * 0.58, isolated_noise * 0.88);
+        alpha = lerp(alpha, gaussian_alpha, saturate(spatial_denoise));
+        alpha = lerp(alpha, neighbor_alpha_sum * 0.125, isolated_noise * 0.94);
+
         if (HairDetail > 0.001) {
             // Screen subtraction estimates fractional coverage. Local structure
             // prevents broad screen shadows and sensor noise becoming fake hair.
             float pixel_difference = screen_difference(boost_sat(color.rgb, KeySatBoost));
             float key_difference = max(screen_difference(boost_sat(KeyColor.rgb, KeySatBoost)), 0.02);
-            float screen_subtraction_alpha = 1.0 - saturate(pixel_difference / key_difference);
+            float diff_left = screen_difference(boost_sat(left.rgb, KeySatBoost));
+            float diff_right = screen_difference(boost_sat(right.rgb, KeySatBoost));
+            float diff_up = screen_difference(boost_sat(up.rgb, KeySatBoost));
+            float diff_down = screen_difference(boost_sat(down.rgb, KeySatBoost));
+            float diff_top_left = screen_difference(boost_sat(top_left.rgb, KeySatBoost));
+            float diff_top_right = screen_difference(boost_sat(top_right.rgb, KeySatBoost));
+            float diff_bottom_left = screen_difference(boost_sat(bottom_left.rgb, KeySatBoost));
+            float diff_bottom_right = screen_difference(boost_sat(bottom_right.rgb, KeySatBoost));
+
+            // A real one-pixel strand continues in at least one direction. A
+            // random noisy pixel has no matching opposite pair and is rejected.
+            float support_low = lerp(0.025, 0.006, HairSoftness);
+            float support_high = lerp(0.20, 0.065, HairSoftness);
+            float strand_coherence = smoothstep(support_low, support_high, directional_alpha_support);
+
+            float pair_horizontal = (diff_left + diff_right) * 0.5;
+            float pair_vertical = (diff_up + diff_down) * 0.5;
+            float pair_diagonal_a = (diff_top_left + diff_bottom_right) * 0.5;
+            float pair_diagonal_b = (diff_top_right + diff_bottom_left) * 0.5;
+            float coherent_difference = min(min(pair_horizontal, pair_vertical),
+                                            min(pair_diagonal_a, pair_diagonal_b));
+            float stabilized_difference = lerp(pixel_difference, coherent_difference,
+                                                strand_coherence * 0.32);
+            float screen_subtraction_alpha = 1.0 - saturate(stabilized_difference / key_difference);
             float neighbor_alpha_average = neighbor_alpha_sum * 0.125;
             float surround_screen = saturate(1.0 - neighbor_alpha_average);
             float pixel_luma = dot(color.rgb, float3(0.2126, 0.7152, 0.0722));
@@ -593,8 +694,21 @@ float4 PSAdaptiveKey(VertData v_in) : TARGET {
             float structure = smoothstep(detail_low, detail_high,
                                          local_luma_detail + local_matte_range * 0.16 +
                                          chroma_distance_to_key(color.rgb) * 0.18);
-            float hair_confidence = saturate(surround_screen * structure + local_matte_range * 0.45);
+            float attached_to_subject = smoothstep(0.45, 0.92, surround_max_alpha);
+            float coherent_structure = max(strand_coherence, attached_to_subject * 0.82);
+            float hair_confidence = saturate(surround_screen * structure * (0.18 + coherent_structure * 0.82) +
+                                             local_matte_range * coherent_structure * 0.24);
             hair_alpha = screen_subtraction_alpha * hair_confidence;
+
+            // Chromaticity distance alone often labels a brown/blond strand
+            // mixed with green as nearly opaque. For coherent thin structures,
+            // pull that overestimated alpha toward the physical screen-
+            // subtraction solution. Opaque foreground has subtraction alpha
+            // near one and is therefore unchanged.
+            float fractional_evidence = coherent_structure * structure * HairDetail *
+                                        (1.0 - smoothstep(0.82, 0.98, screen_subtraction_alpha));
+            float physical_hair_alpha = screen_subtraction_alpha * lerp(0.78, 1.0, hair_confidence);
+            alpha = lerp(alpha, min(alpha, physical_hair_alpha), saturate(fractional_evidence));
             alpha = max(alpha, hair_alpha * HairDetail);
         }
 
@@ -613,17 +727,65 @@ float4 PSAdaptiveKey(VertData v_in) : TARGET {
     float cleaned_alpha = smoothstep(clean_amount * 0.35, 1.0 - clean_amount * 0.15, alpha);
     alpha = saturate(lerp(alpha, cleaned_alpha, clean_amount));
 
+    // Motion-aware temporal stabilization. Previous alpha is variance-clipped
+    // to the current 3x3 neighborhood, preventing trails on moving body edges
+    // while suppressing high-rate one-frame sparkle in hair and background.
+    float4 previous_color = float4(0.0, 0.0, 0.0, 0.0);
+    float temporal_weight = 0.0;
+    if (HistoryValid > 0.5 && TemporalStability > 0.001) {
+        previous_color = previous_image.Sample(def_sampler, v_in.uv);
+        float previous_alpha = previous_color.a / max(Opacity, 0.001);
+        float envelope_min = max(min(min_neighbor_alpha, alpha) - 0.035, 0.0);
+        float envelope_max = min(max(max_neighbor_alpha, alpha) + 0.035, 1.0);
+        previous_alpha = clamp(previous_alpha, envelope_min, envelope_max);
+        float matte_delta = abs(alpha - previous_alpha);
+        float stationary = 1.0 - smoothstep(0.035, 0.22, matte_delta);
+        float fractional = smoothstep(0.015, 0.32, alpha) *
+                           (1.0 - smoothstep(0.76, 0.98, alpha));
+        temporal_weight = saturate(TemporalStability) * stationary * (0.32 + fractional * 0.68);
+        alpha = lerp(alpha, previous_alpha, temporal_weight);
+    }
+
     // Remove the estimated screen contribution from partial edge pixels. This
     // eliminates the colored fringe before the gentler channel despill below.
     float key_energy = max(dot(KeyColor.rgb, KeyColor.rgb), 0.001);
     float screen_scale = clamp(dot(color.rgb, KeyColor.rgb) / key_energy, 0.2, 2.5);
     float3 scaled_key = KeyColor.rgb * screen_scale;
     float3 sampled_screen = neighbor_screen_sum / max(neighbor_screen_weight, 0.001);
-    float sampled_screen_confidence = smoothstep(2.0, 6.0, neighbor_screen_weight);
+    float sampled_screen_confidence = smoothstep(1.2, 4.8, neighbor_screen_weight);
     float3 local_screen = lerp(scaled_key, sampled_screen, sampled_screen_confidence);
-    float safe_alpha = max(alpha, 0.08);
+    float safe_alpha = max(alpha, 0.06);
     float3 unmixed_color = (color.rgb - local_screen * (1.0 - alpha)) / safe_alpha;
     unmixed_color = clamp(unmixed_color, float3(0.0, 0.0, 0.0), float3(1.25, 1.25, 1.25));
+
+    // Remove any residual screen channel left by an imperfect alpha estimate.
+    // This is deliberately one-way: it cannot reintroduce green/blue into hair.
+    float unmix_screen_excess = max(screen_difference(unmixed_color), 0.0);
+    if (ScreenType == 1) {
+        unmixed_color.b = max(unmixed_color.b - unmix_screen_excess * 1.12, 0.0);
+    } else {
+        unmixed_color.g = max(unmixed_color.g - unmix_screen_excess * 1.12, 0.0);
+    }
+
+    // Edge-color replacement borrows hue only from confident nearby foreground.
+    // It makes detached fractional strands match the surrounding real hair
+    // instead of displaying the screen color amplified by alpha division.
+    float3 foreground_reference = neighbor_foreground_sum / max(neighbor_foreground_weight, 0.001);
+    float reference_screen_excess = max(screen_difference(foreground_reference), 0.0);
+    if (ScreenType == 1) {
+        foreground_reference.b = max(foreground_reference.b - reference_screen_excess, 0.0);
+    } else {
+        foreground_reference.g = max(foreground_reference.g - reference_screen_excess, 0.0);
+    }
+    float reference_confidence = smoothstep(0.28, 1.65, neighbor_foreground_weight);
+    float recovered_hair_mask = smoothstep(0.008, 0.16, hair_alpha) *
+                                (1.0 - smoothstep(0.62, 0.92, alpha));
+    float unstable_unmix = 1.0 - smoothstep(0.12, 0.42, alpha);
+    float residual_spill_need = smoothstep(0.002, 0.07, unmix_screen_excess);
+    float color_replacement = recovered_hair_mask * reference_confidence *
+                              max(unstable_unmix * 0.82, residual_spill_need) * 1.65;
+    unmixed_color = lerp(unmixed_color, foreground_reference, saturate(color_replacement));
+
     float decontaminate_mask = smoothstep(0.03, 0.3, alpha) * (1.0 - smoothstep(0.82, 0.995, alpha));
     color.rgb = lerp(color.rgb, unmixed_color, saturate(decontaminate_mask * SpillReduction * 0.8));
 
@@ -665,6 +827,17 @@ float4 PSAdaptiveKey(VertData v_in) : TARGET {
     color.g += Tint * 0.1;
     float luma = dot(color.rgb, float3(0.2126, 0.7152, 0.0722));
     color.rgb = saturate(lerp(float3(luma, luma, luma), color.rgb, Saturation));
+
+    if (HistoryValid > 0.5 && temporal_weight > 0.001) {
+        float previous_visible = smoothstep(0.02, 0.16, previous_color.a / max(Opacity, 0.001));
+        float current_visible = smoothstep(0.02, 0.16, alpha);
+        float color_delta = length(color.rgb - previous_color.rgb);
+        float color_stationary = 1.0 - smoothstep(0.08, 0.34, color_delta);
+        float temporal_color_weight = temporal_weight * previous_visible * current_visible *
+                                      color_stationary * 0.52;
+        color.rgb = lerp(color.rgb, previous_color.rgb, temporal_color_weight);
+    }
+
     color.a *= alpha * Opacity;
     return color;
 }

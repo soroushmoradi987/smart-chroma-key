@@ -21,6 +21,9 @@ enum smart_chroma_screen_type {
 
 struct smart_chroma_effect_params {
 	gs_eparam_t *texel_size;
+	gs_eparam_t *previous_image;
+	gs_eparam_t *history_valid;
+	gs_eparam_t *temporal_stability;
 	gs_eparam_t *screen_type;
 	gs_eparam_t *key_color;
 	gs_eparam_t *base_key;
@@ -85,6 +88,7 @@ struct smart_chroma_data {
 
 	/* Key Processing */
 	float key_sat_boost;
+	float temporal_stability;
 
 	/* Opacity */
 	float opacity;
@@ -95,6 +99,13 @@ struct smart_chroma_data {
 	gs_stagesurf_t *stagesurf;
 	uint32_t at_width;
 	uint32_t at_height;
+
+	/* Motion-aware temporal stabilization uses ping-pong output history. */
+	gs_texrender_t *history[2];
+	uint32_t history_width;
+	uint32_t history_height;
+	uint32_t history_index;
+	bool history_valid;
 };
 
 static bool smart_chroma_cache_effect_params(struct smart_chroma_data *f)
@@ -113,6 +124,9 @@ static bool smart_chroma_cache_effect_params(struct smart_chroma_data *f)
 	} while (false)
 
 	CACHE_EFFECT_PARAM(texel_size, "texel_size");
+	CACHE_EFFECT_PARAM(previous_image, "previous_image");
+	CACHE_EFFECT_PARAM(history_valid, "HistoryValid");
+	CACHE_EFFECT_PARAM(temporal_stability, "TemporalStability");
 	CACHE_EFFECT_PARAM(screen_type, "ScreenType");
 	CACHE_EFFECT_PARAM(key_color, "KeyColor");
 	CACHE_EFFECT_PARAM(base_key, "BaseKey");
@@ -201,8 +215,10 @@ static void smart_chroma_update(void *data, obs_data_t *settings)
 	f->tint = (float)obs_data_get_double(settings, "tint");
 
 	f->key_sat_boost = (float)obs_data_get_double(settings, "key_sat_boost");
+	f->temporal_stability = clamp_float((float)obs_data_get_double(settings, "temporal_stability"), 0.0f, 1.0f);
 
 	f->opacity = fminf(fmaxf((float)obs_data_get_double(settings, "opacity"), 0.0f), 1.0f);
+	f->history_valid = false;
 }
 
 static void *smart_chroma_create(obs_data_t *settings, obs_source_t *context)
@@ -220,6 +236,8 @@ static void *smart_chroma_create(obs_data_t *settings, obs_source_t *context)
 	obs_enter_graphics();
 	f->effect = path ? gs_effect_create_from_file(path, NULL) : NULL;
 	f->texrender = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->history[0] = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->history[1] = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	if (f->effect && !smart_chroma_cache_effect_params(f)) {
 		gs_effect_destroy(f->effect);
 		f->effect = NULL;
@@ -246,6 +264,10 @@ static void smart_chroma_destroy(void *data)
 		gs_texrender_destroy(f->texrender);
 	if (f->stagesurf)
 		gs_stagesurface_destroy(f->stagesurf);
+	if (f->history[0])
+		gs_texrender_destroy(f->history[0]);
+	if (f->history[1])
+		gs_texrender_destroy(f->history[1]);
 	obs_leave_graphics();
 	bfree(f);
 }
@@ -512,6 +534,7 @@ static void auto_tune_phase2(struct smart_chroma_data *f)
 	obs_data_set_double(settings, "despill_light", 1.0);
 	obs_data_set_double(settings, "despill_dark", 0.9);
 	obs_data_set_double(settings, "key_sat_boost", (double)auto_sat_boost);
+	obs_data_set_double(settings, "temporal_stability", 0.72);
 	obs_data_set_double(settings, "hair_detail", 0.85);
 	obs_data_set_double(settings, "hair_softness", 0.35);
 	obs_data_set_double(settings, "edge_blur", 0.65);
@@ -603,6 +626,7 @@ static obs_properties_t *smart_chroma_properties(void *data)
 
 	/* --- Key Processing --- */
 	obs_properties_add_float_slider(p, "key_sat_boost", obs_module_text("KeySatBoost"), 1.0, 5.0, 0.01);
+	obs_properties_add_float_slider(p, "temporal_stability", obs_module_text("TemporalStability"), 0.0, 1.0, 0.01);
 
 	/* --- Opacity --- */
 	obs_properties_add_float_slider(p, "opacity", obs_module_text("Opacity"), 0.0, 1.0, 0.01);
@@ -639,6 +663,7 @@ static void smart_chroma_defaults(obs_data_t *s)
 	obs_data_set_default_double(s, "tint", 0.0);
 
 	obs_data_set_default_double(s, "key_sat_boost", 1.25);
+	obs_data_set_default_double(s, "temporal_stability", 0.72);
 
 	obs_data_set_default_double(s, "opacity", 1.0);
 }
@@ -667,17 +692,37 @@ static void smart_chroma_render(void *data, gs_effect_t *effect)
 		return;
 	}
 
-	if (!obs_source_process_filter_begin(f->context, GS_RGBA, OBS_ALLOW_DIRECT_RENDERING))
+	/* Temporal stabilization needs the filtered frame in a history texture, so
+	 * direct rendering must be disabled for this filter. */
+	if (!obs_source_process_filter_begin(f->context, GS_RGBA, OBS_NO_DIRECT_RENDERING))
 		return;
 
 	/* Compute texel size */
 	uint32_t tw = obs_source_get_base_width(target);
 	uint32_t th = obs_source_get_base_height(target);
+	if (tw == 0 || th == 0) {
+		obs_source_skip_video_filter(f->context);
+		f->history_valid = false;
+		return;
+	}
+	if (tw != f->history_width || th != f->history_height) {
+		f->history_width = tw;
+		f->history_height = th;
+		f->history_index = 0;
+		f->history_valid = false;
+	}
+
 	struct vec2 ts;
-	ts.x = (tw > 0) ? 1.0f / (float)tw : 0.0f;
-	ts.y = (th > 0) ? 1.0f / (float)th : 0.0f;
+	ts.x = 1.0f / (float)tw;
+	ts.y = 1.0f / (float)th;
 
 	gs_effect_set_vec2(f->params.texel_size, &ts);
+	gs_texture_t *previous_texture = f->history_valid ? gs_texrender_get_texture(f->history[f->history_index])
+							  : NULL;
+	if (previous_texture)
+		gs_effect_set_texture(f->params.previous_image, previous_texture);
+	gs_effect_set_float(f->params.history_valid, previous_texture ? 1.0f : 0.0f);
+	gs_effect_set_float(f->params.temporal_stability, f->temporal_stability);
 	gs_effect_set_int(f->params.screen_type, f->detected_screen_type);
 	gs_effect_set_vec4(f->params.key_color, &f->key_color);
 	gs_effect_set_float(f->params.base_key, f->base_key);
@@ -702,7 +747,46 @@ static void smart_chroma_render(void *data, gs_effect_t *effect)
 	gs_effect_set_float(f->params.key_sat_boost, f->key_sat_boost);
 	gs_effect_set_float(f->params.opacity, f->opacity);
 
-	obs_source_process_filter_end(f->context, f->effect, 0, 0);
+	uint32_t next_history_index = f->history_index ^ 1U;
+	gs_texrender_t *next_history = f->history[next_history_index];
+	bool history_rendered = false;
+
+	if (next_history) {
+		gs_texrender_reset(next_history);
+		gs_blend_state_push();
+		gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
+		if (gs_texrender_begin(next_history, tw, th)) {
+			struct vec4 clear_color;
+			vec4_zero(&clear_color);
+			gs_clear(GS_CLEAR_COLOR, &clear_color, 0.0f, 0);
+			gs_ortho(0.0f, (float)tw, 0.0f, (float)th, -100.0f, 100.0f);
+			obs_source_process_filter_end(f->context, f->effect, tw, th);
+			gs_texrender_end(next_history);
+			history_rendered = true;
+		}
+		gs_blend_state_pop();
+	}
+
+	if (!history_rendered) {
+		f->history_valid = false;
+		obs_source_process_filter_end(f->context, f->effect, 0, 0);
+		return;
+	}
+
+	gs_texture_t *output_texture = gs_texrender_get_texture(next_history);
+	gs_effect_t *default_effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+	if (!output_texture || !default_effect) {
+		f->history_valid = false;
+		return;
+	}
+
+	gs_eparam_t *image = gs_effect_get_param_by_name(default_effect, "image");
+	gs_effect_set_texture(image, output_texture);
+	while (gs_effect_loop(default_effect, "Draw"))
+		gs_draw_sprite(output_texture, 0, tw, th);
+
+	f->history_index = next_history_index;
+	f->history_valid = true;
 }
 
 static struct obs_source_info smart_chroma_key_filter = {
