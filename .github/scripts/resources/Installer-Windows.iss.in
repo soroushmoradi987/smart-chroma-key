@@ -15,7 +15,8 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 AppComments=Professional green and blue screen removal for OBS Studio
-DefaultDirName={autopf64}\obs-studio
+DefaultDirName={commonappdata}\obs-studio\plugins\@PRODUCT_NAME@
+UsePreviousAppDir=no
 DefaultGroupName={#MyAppName}
 LicenseFile="@LICENSE_FILE@"
 OutputDir="@OUTPUT_DIR@"
@@ -27,10 +28,10 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 DisableWelcomePage=no
+DisableDirPage=yes
 DisableProgramGroupPage=yes
 SetupLogging=yes
 UninstallDisplayName={#MyAppName}
-UninstallDisplayIcon={app}\bin\64bit\obs64.exe
 CloseApplications=yes
 CloseApplicationsFilter=obs64.exe
 RestartApplications=no
@@ -42,32 +43,9 @@ VersionInfoProductVersion={#MyAppVersion}
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "@STAGING_DIR@\\plugin\\bin\\64bit\\@PRODUCT_NAME@.dll"; DestDir: "{app}\\obs-plugins\\64bit"; Flags: ignoreversion
-Source: "@STAGING_DIR@\\plugin\\data\\*"; DestDir: "{commonappdata}\\obs-studio\\plugins\\@PRODUCT_NAME@\\data"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "@STAGING_DIR@\\plugin\\bin\\64bit\\@PRODUCT_NAME@.dll"; DestDir: "{app}\\bin\\64bit"; Flags: ignoreversion
+Source: "@STAGING_DIR@\\plugin\\data\\*"; DestDir: "{app}\\data"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-[Run]
-Filename: "{app}\bin\64bit\obs64.exe"; Description: "Launch OBS Studio"; Flags: postinstall nowait skipifsilent runasoriginaluser unchecked
-
-[UninstallDelete]
-Type: filesandordirs; Name: "{commonappdata}\\obs-studio\\plugins\\@PRODUCT_NAME@\\data"
-Type: dirifempty; Name: "{commonappdata}\\obs-studio\\plugins\\@PRODUCT_NAME@"
-
-[Code]
-function NextButtonClick(CurPageID: Integer): Boolean;
-begin
-  Result := True;
-
-  if CurPageID = wpSelectDir then
-  begin
-    if not FileExists(ExpandConstant('{app}\\bin\\64bit\\obs64.exe')) then
-    begin
-      Result := MsgBox(
-        'The selected folder does not look like an OBS Studio installation root.' + #13#10 +
-        'The installer will place the plugin DLL under obs-plugins\\64bit inside this folder.' + #13#10 + #13#10 +
-        'Continue anyway?',
-        mbConfirmation,
-        MB_YESNO
-      ) = IDYES;
-    end;
-  end;
-end;
+[InstallDelete]
+; Remove the broken split-layout DLL produced by version 1.1.0.
+Type: files; Name: "{autopf64}\\obs-studio\\obs-plugins\\64bit\\@PRODUCT_NAME@.dll"

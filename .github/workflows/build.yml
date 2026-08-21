@@ -72,24 +72,22 @@ jobs:
             throw 'Windows installer was not created.'
           }
 
-          $ObsRoot = Join-Path $env:RUNNER_TEMP 'obs-studio'
-          New-Item -ItemType Directory -Force -Path (Join-Path $ObsRoot 'bin/64bit') | Out-Null
-          New-Item -ItemType File -Force -Path (Join-Path $ObsRoot 'bin/64bit/obs64.exe') | Out-Null
+          $PluginRoot = Join-Path $env:RUNNER_TEMP 'smart-chroma-key-test'
 
           $InstallerProcess = Start-Process -FilePath $Installer.FullName `
-            -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"${ObsRoot}`"") `
+            -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"${PluginRoot}`"") `
             -Wait -PassThru
           if ( $InstallerProcess.ExitCode -ne 0 ) {
             throw "Installer exited with code $($InstallerProcess.ExitCode)."
           }
 
-          $PluginDll = Join-Path $ObsRoot 'obs-plugins/64bit/smart-chroma-key.dll'
-          $PluginEffect = Join-Path $env:ProgramData 'obs-studio/plugins/smart-chroma-key/data/smart-chroma-key.effect'
+          $PluginDll = Join-Path $PluginRoot 'bin/64bit/smart-chroma-key.dll'
+          $PluginEffect = Join-Path $PluginRoot 'data/smart-chroma-key.effect'
           if ( ! ( Test-Path $PluginDll ) -or ! ( Test-Path $PluginEffect ) ) {
             throw 'Installed plugin payload is incomplete.'
           }
 
-          $Uninstaller = Get-Item (Join-Path $ObsRoot 'unins*.exe') | Select-Object -First 1
+          $Uninstaller = Get-Item (Join-Path $PluginRoot 'unins*.exe') | Select-Object -First 1
           $UninstallerProcess = Start-Process -FilePath $Uninstaller.FullName `
             -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') `
             -Wait -PassThru

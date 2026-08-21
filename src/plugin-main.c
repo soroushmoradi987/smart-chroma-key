@@ -16,6 +16,7 @@ OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
 enum smart_chroma_screen_type {
 	SMART_CHROMA_SCREEN_GREEN = 0,
 	SMART_CHROMA_SCREEN_BLUE = 1,
+	SMART_CHROMA_SCREEN_AUTO = 2,
 };
 
 struct smart_chroma_effect_params {
@@ -52,6 +53,7 @@ struct smart_chroma_data {
 
 	/* Chroma Key */
 	int screen_type;
+	int detected_screen_type;
 	struct vec4 key_color;
 	float base_key;
 	float edge_softness;
@@ -145,6 +147,11 @@ static float screen_difference(float r, float g, float b, int screen_type)
 	return screen_type == SMART_CHROMA_SCREEN_BLUE ? b - fmaxf(r, g) : g - fmaxf(r, b);
 }
 
+static float clamp_float(float value, float minimum, float maximum)
+{
+	return fminf(fmaxf(value, minimum), maximum);
+}
+
 static const char *smart_chroma_name(void *unused)
 {
 	UNUSED_PARAMETER(unused);
@@ -154,8 +161,17 @@ static const char *smart_chroma_name(void *unused)
 static void smart_chroma_update(void *data, obs_data_t *settings)
 {
 	struct smart_chroma_data *f = data;
+	int previous_screen_type = f->screen_type;
 	int screen_type = (int)obs_data_get_int(settings, "screen_type");
-	f->screen_type = screen_type == SMART_CHROMA_SCREEN_BLUE ? SMART_CHROMA_SCREEN_BLUE : SMART_CHROMA_SCREEN_GREEN;
+	if (screen_type == SMART_CHROMA_SCREEN_BLUE || screen_type == SMART_CHROMA_SCREEN_AUTO)
+		f->screen_type = screen_type;
+	else
+		f->screen_type = SMART_CHROMA_SCREEN_GREEN;
+
+	if (f->screen_type != SMART_CHROMA_SCREEN_AUTO)
+		f->detected_screen_type = f->screen_type;
+	else if (previous_screen_type != SMART_CHROMA_SCREEN_AUTO && f->auto_tune_phase == 0)
+		f->auto_tune_phase = 1;
 
 	uint32_t kc = (uint32_t)obs_data_get_int(settings, "key_color");
 	vec4_from_rgba(&f->key_color, kc);
@@ -203,7 +219,7 @@ static void *smart_chroma_create(obs_data_t *settings, obs_source_t *context)
 
 	obs_enter_graphics();
 	f->effect = path ? gs_effect_create_from_file(path, NULL) : NULL;
-	f->texrender = gs_texrender_create(GS_RGBA, 1);
+	f->texrender = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	if (f->effect && !smart_chroma_cache_effect_params(f)) {
 		gs_effect_destroy(f->effect);
 		f->effect = NULL;
@@ -315,84 +331,165 @@ static void auto_tune_phase2(struct smart_chroma_data *f)
 		return;
 	}
 
-	/* Sample 9 points around the borders (corners + edge midpoints) */
+	/* Analyze a dense border grid. The border is much more likely to contain
+	 * clean screen than the frame center, while hundreds of samples make the
+	 * estimate resistant to a person, props, wrinkles, and uneven lighting. */
+	const uint32_t grid_width = 64;
+	const uint32_t grid_height = 36;
+	const uint32_t border_x = 8;
+	const uint32_t border_y = 5;
+	float green_score = 0.0f;
+	float blue_score = 0.0f;
+	uint32_t valid_samples = 0;
+
+	for (uint32_t gy = 0; gy < grid_height; gy++) {
+		for (uint32_t gx = 0; gx < grid_width; gx++) {
+			bool is_border = gx < border_x || gx >= grid_width - border_x || gy < border_y ||
+					 gy >= grid_height - border_y;
+			if (!is_border)
+				continue;
+
+			uint32_t px = gx * (w - 1) / (grid_width - 1);
+			uint32_t py = gy * (h - 1) / (grid_height - 1);
+			uint8_t *p = video_data + py * linesize + px * 4;
+			if (p[3] < 32)
+				continue;
+
+			float r = p[0] / 255.0f;
+			float g = p[1] / 255.0f;
+			float b = p[2] / 255.0f;
+			float maximum = fmaxf(r, fmaxf(g, b));
+			float minimum = fminf(r, fminf(g, b));
+			float saturation = maximum - minimum;
+			if (maximum < 0.025f || saturation < 0.02f)
+				continue;
+
+			float green_difference = fmaxf(screen_difference(r, g, b, SMART_CHROMA_SCREEN_GREEN), 0.0f);
+			float blue_difference = fmaxf(screen_difference(r, g, b, SMART_CHROMA_SCREEN_BLUE), 0.0f);
+			green_score += green_difference * green_difference * (0.25f + saturation);
+			blue_score += blue_difference * blue_difference * (0.25f + saturation);
+			valid_samples++;
+		}
+	}
+
+	int detected_type = f->screen_type;
+	if (detected_type == SMART_CHROMA_SCREEN_AUTO)
+		detected_type = blue_score > green_score ? SMART_CHROMA_SCREEN_BLUE : SMART_CHROMA_SCREEN_GREEN;
+
+	/* First robust pass: estimate the chromaticity centroid of plausible
+	 * screen pixels. Selected-channel dominance is squared so foreground
+	 * pixels touching the frame contribute very little. */
+	float rough_r = 0.0f, rough_g = 0.0f, rough_b = 0.0f;
+	float rough_weight = 0.0f;
+	uint32_t candidate_samples = 0;
+	for (uint32_t gy = 0; gy < grid_height; gy++) {
+		for (uint32_t gx = 0; gx < grid_width; gx++) {
+			bool is_border = gx < border_x || gx >= grid_width - border_x || gy < border_y ||
+					 gy >= grid_height - border_y;
+			if (!is_border)
+				continue;
+
+			uint32_t px = gx * (w - 1) / (grid_width - 1);
+			uint32_t py = gy * (h - 1) / (grid_height - 1);
+			uint8_t *p = video_data + py * linesize + px * 4;
+			if (p[3] < 32)
+				continue;
+
+			float r = p[0] / 255.0f;
+			float g = p[1] / 255.0f;
+			float b = p[2] / 255.0f;
+			float difference = screen_difference(r, g, b, detected_type);
+			if (difference <= 0.015f)
+				continue;
+
+			float weight = difference * difference;
+			rough_r += r * weight;
+			rough_g += g * weight;
+			rough_b += b * weight;
+			rough_weight += weight;
+			candidate_samples++;
+		}
+	}
+
+	if (rough_weight <= 0.001f || valid_samples == 0) {
+		gs_stagesurface_unmap(f->stagesurf);
+		f->auto_tune_phase = 0;
+		obs_log(LOG_WARNING,
+			"Auto Tune could not find a sufficiently saturated green or blue screen near the frame borders");
+		return;
+	}
+
+	rough_r /= rough_weight;
+	rough_g /= rough_weight;
+	rough_b /= rough_weight;
+	float rough_sum = fmaxf(rough_r + rough_g + rough_b, 0.001f);
+	float rough_cr = rough_r / rough_sum;
+	float rough_cg = rough_g / rough_sum;
+	float rough_cb = rough_b / rough_sum;
+
+	/* Second pass: reject chromaticity outliers and calculate screen variance.
+	 * The variance drives the matte tolerance, so a wrinkled/noisy screen gets
+	 * enough latitude without erasing similarly colored foreground detail. */
 	float avg_r = 0.0f, avg_g = 0.0f, avg_b = 0.0f;
-	float keyed_r = 0.0f, keyed_g = 0.0f, keyed_b = 0.0f;
 	float keyed_weight = 0.0f;
-	int count = 0;
-	uint32_t mx = w / 20; /* 5% margin */
-	uint32_t my = h / 20;
+	float distance_squared_sum = 0.0f;
+	uint32_t accepted_samples = 0;
+	for (uint32_t gy = 0; gy < grid_height; gy++) {
+		for (uint32_t gx = 0; gx < grid_width; gx++) {
+			bool is_border = gx < border_x || gx >= grid_width - border_x || gy < border_y ||
+					 gy >= grid_height - border_y;
+			if (!is_border)
+				continue;
 
-	/* 9 sample positions: 4 corners + 4 edge midpoints + 1 top-center */
-	uint32_t sx[9], sy[9];
-	sx[0] = mx;
-	sy[0] = my; /* top-left */
-	sx[1] = w / 2;
-	sy[1] = my; /* top-center */
-	sx[2] = w - 1 - mx;
-	sy[2] = my; /* top-right */
-	sx[3] = mx;
-	sy[3] = h / 2; /* mid-left */
-	sx[4] = w - 1 - mx;
-	sy[4] = h / 2; /* mid-right */
-	sx[5] = mx;
-	sy[5] = h - 1 - my; /* bottom-left */
-	sx[6] = w / 2;
-	sy[6] = h - 1 - my; /* bottom-center */
-	sx[7] = w - 1 - mx;
-	sy[7] = h - 1 - my; /* bottom-right */
-	sx[8] = w / 4;
-	sy[8] = my; /* quarter-top */
+			uint32_t px = gx * (w - 1) / (grid_width - 1);
+			uint32_t py = gy * (h - 1) / (grid_height - 1);
+			uint8_t *p = video_data + py * linesize + px * 4;
+			if (p[3] < 32)
+				continue;
 
-	for (int i = 0; i < 9; i++) {
-		/* Sample 5x5 block around each point */
-		for (int dy = -2; dy <= 2; dy++) {
-			for (int dx = -2; dx <= 2; dx++) {
-				uint32_t px = sx[i] + dx;
-				uint32_t py = sy[i] + dy;
-				if (px >= w || py >= h)
-					continue;
-				uint8_t *p = video_data + py * linesize + px * 4;
-				float r = p[0] / 255.0f;
-				float g = p[1] / 255.0f;
-				float b = p[2] / 255.0f;
-				float difference = screen_difference(r, g, b, f->screen_type);
-				avg_r += r;
-				avg_g += g;
-				avg_b += b;
-				if (difference > 0.0f) {
-					float weight = difference * difference;
-					keyed_r += r * weight;
-					keyed_g += g * weight;
-					keyed_b += b * weight;
-					keyed_weight += weight;
-				}
-				count++;
-			}
+			float r = p[0] / 255.0f;
+			float g = p[1] / 255.0f;
+			float b = p[2] / 255.0f;
+			float difference = screen_difference(r, g, b, detected_type);
+			float sum = r + g + b;
+			if (difference <= 0.015f || sum <= 0.025f)
+				continue;
+
+			float dr = r / sum - rough_cr;
+			float dg = g / sum - rough_cg;
+			float db = b / sum - rough_cb;
+			float distance_squared = dr * dr + dg * dg + db * db;
+			if (distance_squared > 0.0324f) /* 0.18 chromaticity radius */
+				continue;
+
+			float similarity = 1.0f - sqrtf(distance_squared) / 0.18f;
+			float weight = difference * difference * similarity * similarity;
+			avg_r += r * weight;
+			avg_g += g * weight;
+			avg_b += b * weight;
+			distance_squared_sum += distance_squared * weight;
+			keyed_weight += weight;
+			accepted_samples++;
 		}
 	}
 
 	gs_stagesurface_unmap(f->stagesurf);
 	f->auto_tune_phase = 0;
 
-	if (count == 0)
+	if (keyed_weight <= 0.001f || accepted_samples < 12)
 		return;
 
-	avg_r /= count;
-	avg_g /= count;
-	avg_b /= count;
-	if (keyed_weight > 0.001f) {
-		avg_r = keyed_r / keyed_weight;
-		avg_g = keyed_g / keyed_weight;
-		avg_b = keyed_b / keyed_weight;
-	}
-
-	float key_difference = screen_difference(avg_r, avg_g, avg_b, f->screen_type);
+	avg_r /= keyed_weight;
+	avg_g /= keyed_weight;
+	avg_b /= keyed_weight;
+	float chroma_deviation = sqrtf(distance_squared_sum / keyed_weight);
+	float key_difference = screen_difference(avg_r, avg_g, avg_b, detected_type);
 	if (key_difference <= 0.01f) {
 		obs_log(LOG_WARNING, "Auto Tune could not find enough %s screen color near the frame borders",
-			f->screen_type == SMART_CHROMA_SCREEN_BLUE ? "blue" : "green");
+			detected_type == SMART_CHROMA_SCREEN_BLUE ? "blue" : "green");
 		return;
 	}
+	f->detected_screen_type = detected_type;
 
 	/* Set key color (OBS color format: 0xAABBGGRR) */
 	uint32_t key_color = 0xFF000000 | ((uint32_t)(avg_b * 255.0f) << 16) | ((uint32_t)(avg_g * 255.0f) << 8) |
@@ -403,25 +500,26 @@ static void auto_tune_phase2(struct smart_chroma_data *f)
 	obs_data_set_int(settings, "key_color", (long long)key_color);
 
 	/* Auto-tune based on screen characteristics */
-	float auto_base_key = fmaxf(0.005f, key_difference * 0.08f);
-	float auto_softness = fminf(0.85f, fmaxf(0.04f, key_difference * 0.7f));
-	float auto_sat_boost = fminf(3.0f, 1.0f + (1.0f - key_difference) * 0.8f);
+	float coverage = (float)candidate_samples / (float)valid_samples;
+	float auto_base_key = clamp_float(0.018f + chroma_deviation * 2.0f, 0.018f, 0.095f);
+	float auto_softness = clamp_float(0.075f + chroma_deviation * 1.5f, 0.065f, 0.18f);
+	float auto_sat_boost = clamp_float(1.15f + (1.0f - key_difference) * 0.45f, 1.15f, 1.75f);
 
 	obs_data_set_double(settings, "base_key", (double)auto_base_key);
 	obs_data_set_double(settings, "edge_softness", (double)auto_softness);
-	obs_data_set_double(settings, "background_clean", 0.0);
-	obs_data_set_double(settings, "spill_reduction", 0.8);
+	obs_data_set_double(settings, "background_clean", 0.04);
+	obs_data_set_double(settings, "spill_reduction", 1.15);
 	obs_data_set_double(settings, "despill_light", 1.0);
-	obs_data_set_double(settings, "despill_dark", 1.2);
+	obs_data_set_double(settings, "despill_dark", 0.9);
 	obs_data_set_double(settings, "key_sat_boost", (double)auto_sat_boost);
-	obs_data_set_double(settings, "hair_detail", 0.4);
-	obs_data_set_double(settings, "hair_softness", 0.1);
-	obs_data_set_double(settings, "edge_blur", 0.1);
+	obs_data_set_double(settings, "hair_detail", 0.85);
+	obs_data_set_double(settings, "hair_softness", 0.35);
+	obs_data_set_double(settings, "edge_blur", 0.65);
 	obs_data_set_double(settings, "edge_shrink", 0.0);
 	obs_data_set_double(settings, "edge_grow", 0.0);
-	obs_data_set_double(settings, "color_inject_strength", 0.2);
-	obs_data_set_double(settings, "brightness", -0.04);
-	obs_data_set_double(settings, "contrast", 1.1);
+	obs_data_set_double(settings, "color_inject_strength", 0.0);
+	obs_data_set_double(settings, "brightness", 0.0);
+	obs_data_set_double(settings, "contrast", 1.0);
 	obs_data_set_double(settings, "saturation", 1.0);
 	obs_data_set_double(settings, "gamma", 1.0);
 	obs_data_set_double(settings, "temperature", 0.0);
@@ -430,6 +528,11 @@ static void auto_tune_phase2(struct smart_chroma_data *f)
 
 	obs_source_update(f->context, settings);
 	obs_data_release(settings);
+
+	obs_log(LOG_INFO,
+		"Auto Tune detected a %s screen (coverage %.1f%%, chroma deviation %.4f, key RGB %.3f/%.3f/%.3f)",
+		detected_type == SMART_CHROMA_SCREEN_BLUE ? "blue" : "green", coverage * 100.0f, chroma_deviation,
+		avg_r, avg_g, avg_b);
 }
 
 static bool auto_tune_clicked(obs_properties_t *props, obs_property_t *property, void *data)
@@ -447,8 +550,10 @@ static bool screen_type_modified(obs_properties_t *props, obs_property_t *proper
 	UNUSED_PARAMETER(property);
 
 	int screen_type = (int)obs_data_get_int(settings, "screen_type");
-	uint32_t key_color = screen_type == SMART_CHROMA_SCREEN_BLUE ? 0xFFFF0000 : 0xFF00FF00;
-	obs_data_set_int(settings, "key_color", (long long)key_color);
+	if (screen_type != SMART_CHROMA_SCREEN_AUTO) {
+		uint32_t key_color = screen_type == SMART_CHROMA_SCREEN_BLUE ? 0xFFFF0000 : 0xFF00FF00;
+		obs_data_set_int(settings, "key_color", (long long)key_color);
+	}
 	return true;
 }
 
@@ -462,6 +567,7 @@ static obs_properties_t *smart_chroma_properties(void *data)
 	/* --- Chroma Key --- */
 	obs_property_t *screen_type = obs_properties_add_list(p, "screen_type", obs_module_text("ScreenType"),
 							      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(screen_type, obs_module_text("AutoScreen"), SMART_CHROMA_SCREEN_AUTO);
 	obs_property_list_add_int(screen_type, obs_module_text("GreenScreen"), SMART_CHROMA_SCREEN_GREEN);
 	obs_property_list_add_int(screen_type, obs_module_text("BlueScreen"), SMART_CHROMA_SCREEN_BLUE);
 	obs_property_set_modified_callback(screen_type, screen_type_modified);
@@ -506,21 +612,21 @@ static obs_properties_t *smart_chroma_properties(void *data)
 
 static void smart_chroma_defaults(obs_data_t *s)
 {
-	obs_data_set_default_int(s, "screen_type", SMART_CHROMA_SCREEN_GREEN);
+	obs_data_set_default_int(s, "screen_type", SMART_CHROMA_SCREEN_AUTO);
 	obs_data_set_default_int(s, "key_color", 0xFF00FF00);
-	obs_data_set_default_double(s, "base_key", 0.0);
-	obs_data_set_default_double(s, "edge_softness", 0.05);
-	obs_data_set_default_double(s, "background_clean", 0.0);
+	obs_data_set_default_double(s, "base_key", 0.035);
+	obs_data_set_default_double(s, "edge_softness", 0.1);
+	obs_data_set_default_double(s, "background_clean", 0.04);
 
-	obs_data_set_default_double(s, "hair_detail", 0.0);
-	obs_data_set_default_double(s, "hair_softness", 0.5);
+	obs_data_set_default_double(s, "hair_detail", 0.85);
+	obs_data_set_default_double(s, "hair_softness", 0.35);
 
-	obs_data_set_default_double(s, "edge_blur", 0.0);
+	obs_data_set_default_double(s, "edge_blur", 0.65);
 	obs_data_set_default_double(s, "edge_shrink", 0.0);
 	obs_data_set_default_double(s, "edge_grow", 0.0);
 
 	obs_data_set_default_int(s, "hair_color", 0xFF05100D);
-	obs_data_set_default_double(s, "spill_reduction", 1.0);
+	obs_data_set_default_double(s, "spill_reduction", 1.15);
 	obs_data_set_default_double(s, "despill_light", 1.0);
 	obs_data_set_default_double(s, "despill_dark", 1.0);
 	obs_data_set_default_double(s, "color_inject_strength", 0.0);
@@ -532,7 +638,7 @@ static void smart_chroma_defaults(obs_data_t *s)
 	obs_data_set_default_double(s, "temperature", 0.0);
 	obs_data_set_default_double(s, "tint", 0.0);
 
-	obs_data_set_default_double(s, "key_sat_boost", 1.0);
+	obs_data_set_default_double(s, "key_sat_boost", 1.25);
 
 	obs_data_set_default_double(s, "opacity", 1.0);
 }
@@ -572,7 +678,7 @@ static void smart_chroma_render(void *data, gs_effect_t *effect)
 	ts.y = (th > 0) ? 1.0f / (float)th : 0.0f;
 
 	gs_effect_set_vec2(f->params.texel_size, &ts);
-	gs_effect_set_int(f->params.screen_type, f->screen_type);
+	gs_effect_set_int(f->params.screen_type, f->detected_screen_type);
 	gs_effect_set_vec4(f->params.key_color, &f->key_color);
 	gs_effect_set_float(f->params.base_key, f->base_key);
 	gs_effect_set_float(f->params.edge_softness, f->edge_softness);

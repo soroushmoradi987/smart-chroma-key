@@ -4,11 +4,12 @@ A professional chroma key plugin for OBS Studio with dedicated green-screen and 
 
 ## Features
 
-- **Intelligent Auto-Tune**: One-click automatic calibration — samples the selected screen color from frame borders and sets optimal parameters
+- **Automatic Screen Detection**: Detects green versus blue and estimates the actual screen chromaticity from hundreds of robust border samples
+- **Adaptive Chroma Matte**: Brightness-independent chromaticity matching removes folds and shadows without widening the key into foreground colors
 - **Green + Blue Screen Modes**: Channel-aware keying, hair recovery, and despill for either screen color
-- **Advanced Hair Recovery**: 8-neighbor structure analysis + screen subtraction (Ultimatte-style) preserves thin hair strands
-- **Dual Despill System**: Removes green or blue spill from skin and edges using two complementary methods
-- **5×5 Gaussian Alpha Blur**: Smooth, natural-looking edges
+- **Advanced Hair Recovery**: Fractional screen subtraction plus local structure analysis preserves thin and semi-transparent strands
+- **Edge Decontamination + Despill**: Reconstructs partial-edge color from nearby screen samples before targeted green/blue spill suppression
+- **Edge-Aware 3×3 Matte Refinement**: Shared GPU samples provide transition-only smoothing and true morphological shrink/grow
 - **Full Color Correction**: Brightness, contrast, saturation, gamma, temperature, and tint controls
 - **Key Saturation Boost**: Boosts saturation only for keying computation, improving detection without affecting output
 - **Optimized Rendering**: Cached GPU parameter handles and a fast path that skips neighbor sampling when hair recovery is disabled
@@ -27,11 +28,11 @@ For manual or portable installation, download `smart-chroma-key-macos.zip`, extr
 
 ### Windows
 1. Download `smart-chroma-key-<version>-windows-x64-installer.exe` from [Releases](../../releases).
-2. Close OBS Studio and run the modern installer wizard. It validates the selected OBS folder and includes an uninstaller.
+2. Close OBS Studio and run the modern installer wizard. It installs the complete plugin bundle under the OBS-recommended `C:\ProgramData\obs-studio\plugins` location and includes an uninstaller.
 
 If you prefer manual installation or a portable OBS setup, download `smart-chroma-key-windows.zip`, extract it, and copy its contents to your OBS plugins directory:
    ```
-   C:\Program Files\obs-studio\obs-plugins\64bit\smart-chroma-key.dll
+   C:\ProgramData\obs-studio\plugins\smart-chroma-key\bin\64bit\smart-chroma-key.dll
    C:\ProgramData\obs-studio\plugins\smart-chroma-key\data\  (effect + locale files)
    ```
    Or for portable installs, copy to `obs-studio\data\obs-plugins\smart-chroma-key\`
@@ -51,8 +52,8 @@ Unless your release pipeline is configured with trusted signing credentials, loc
 
 1. In OBS, right-click your camera source → **Filters**
 2. Click **+** under Effect Filters → Select **Smart Chroma Key**
-3. Select **Green Screen** or **Blue Screen** under **Screen Type**
-4. Click **Smart Auto Tune** to sample the selected screen color from the frame borders
+3. Leave **Screen Type** on **Auto Detect (Recommended)** for automatic green/blue selection
+4. Click **Analyze Screen Now** whenever the camera, screen, or lighting changes
 5. Fine-tune with sliders if needed:
    - **Base Key / Edge Softness**: Core keying threshold and falloff
    - **Hair Detail / Hair Softness**: Recover thin hair strands
