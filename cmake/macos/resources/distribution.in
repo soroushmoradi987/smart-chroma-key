@@ -6,11 +6,14 @@
         customize="never"
         allow-external-scripts="no" />
     <domains enable_currentUserHome="true" enable_anywhere="false" enable_localSystem="false" />
-    <title>@CMAKE_PROJECT_NAME@</title>
+    <title>@PLUGIN_DISPLAY_NAME@</title>
+    <welcome file="welcome.html" mime-type="text/html" />
+    <license file="LICENSE.txt" mime-type="text/plain" />
+    <conclusion file="conclusion.html" mime-type="text/html" />
     <choices-outline>
         <line choice="obs-plugin" />
     </choices-outline>
-    <choice id="obs-plugin" title="@CMAKE_PROJECT_NAME@" description="">
+    <choice id="obs-plugin" title="@PLUGIN_DISPLAY_NAME@" description="Professional green and blue screen removal for OBS Studio">
         <pkg-ref id="@MACOS_BUNDLEID@" />
     </choice>
     <pkg-ref id="@MACOS_BUNDLEID@" version="@CMAKE_PROJECT_VERSION@">#@CMAKE_PROJECT_NAME@.pkg</pkg-ref>
@@ -28,6 +31,7 @@
                 my.result.type = 'Fatal';
                 return false;
             }
+            return true;
         }
     </script>
 </installer-gui-script>

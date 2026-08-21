@@ -27,15 +27,30 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p package
-          cp -R build_macos/Release/smart-chroma-key.plugin package/
-          cd package && zip -r ../smart-chroma-key-macos.zip smart-chroma-key.plugin
+          cmake --install build_macos --config Release --prefix "$GITHUB_WORKSPACE/release/Release"
+          CI=1 .github/scripts/package-macos --config Release --package
+          ditto -c -k --sequesterRsrc --keepParent \
+            release/Release/smart-chroma-key.plugin \
+            smart-chroma-key-macos.zip
+
+      - name: Verify macOS Installer
+        run: |
+          installer="$(find release -maxdepth 1 -name 'smart-chroma-key-*-macos-universal.pkg' -print -quit)"
+          test -s "$installer"
+          pkgutil --payload-files "$installer" | grep -F 'smart-chroma-key.plugin/Contents/MacOS/smart-chroma-key'
+          pkgutil --payload-files "$installer" | grep -F 'smart-chroma-key.effect'
+          if pkgutil --payload-files "$installer" | grep -E '/\._|/\.DS_Store|\.dSYM'; then
+            echo 'Unexpected metadata or debug symbols in macOS installer' >&2
+            exit 1
+          fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: smart-chroma-key-macos
-          path: smart-chroma-key-macos.zip
+          path: |
+            smart-chroma-key-macos.zip
+            release/smart-chroma-key-*-macos-universal.pkg
 
   build-windows:
     runs-on: windows-2022
@@ -48,6 +63,40 @@ jobs:
         shell: pwsh
         run: |
           .github/scripts/Build-Installer-Windows.ps1 -Target x64 -Configuration Release -InstallDependencies
+
+      - name: Smoke Test Windows Installer
+        shell: pwsh
+        run: |
+          $Installer = Get-Item release/*-installer.exe | Select-Object -First 1
+          if ( $null -eq $Installer -or $Installer.Length -le 0 ) {
+            throw 'Windows installer was not created.'
+          }
+
+          $PluginRoot = Join-Path $env:RUNNER_TEMP 'smart-chroma-key-test'
+
+          $InstallerProcess = Start-Process -FilePath $Installer.FullName `
+            -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"${PluginRoot}`"") `
+            -Wait -PassThru
+          if ( $InstallerProcess.ExitCode -ne 0 ) {
+            throw "Installer exited with code $($InstallerProcess.ExitCode)."
+          }
+
+          $PluginDll = Join-Path $PluginRoot 'bin/64bit/smart-chroma-key.dll'
+          $PluginEffect = Join-Path $PluginRoot 'data/smart-chroma-key.effect'
+          if ( ! ( Test-Path $PluginDll ) -or ! ( Test-Path $PluginEffect ) ) {
+            throw 'Installed plugin payload is incomplete.'
+          }
+
+          $Uninstaller = Get-Item (Join-Path $PluginRoot 'unins*.exe') | Select-Object -First 1
+          $UninstallerProcess = Start-Process -FilePath $Uninstaller.FullName `
+            -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') `
+            -Wait -PassThru
+          if ( $UninstallerProcess.ExitCode -ne 0 ) {
+            throw "Uninstaller exited with code $($UninstallerProcess.ExitCode)."
+          }
+          if ( ( Test-Path $PluginDll ) -or ( Test-Path $PluginEffect ) ) {
+            throw 'Uninstaller left plugin files behind.'
+          }
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -72,6 +121,7 @@ jobs:
         with:
           files: |
             smart-chroma-key-macos/smart-chroma-key-macos.zip
+            smart-chroma-key-macos/*.pkg
             smart-chroma-key-windows/*.zip
             smart-chroma-key-windows/*-installer.exe
           generate_release_notes: true

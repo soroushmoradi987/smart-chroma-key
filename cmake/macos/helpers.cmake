@@ -29,7 +29,6 @@ function(set_target_properties_plugin target)
       XCODE_ATTRIBUTE_CURRENT_PROJECT_VERSION ${PLUGIN_BUILD_NUMBER}
       XCODE_ATTRIBUTE_MARKETING_VERSION ${PLUGIN_VERSION}
       XCODE_ATTRIBUTE_GENERATE_INFOPLIST_FILE YES
-      XCODE_ATTRIBUTE_INFOPLIST_FILE ""
       XCODE_ATTRIBUTE_INFOPLIST_KEY_CFBundleDisplayName ${target}
       XCODE_ATTRIBUTE_INFOPLIST_KEY_NSHumanReadableCopyright "(c) ${CURRENT_YEAR} ${PLUGIN_AUTHOR}"
       XCODE_ATTRIBUTE_INSTALL_PATH "$(USER_LIBRARY_DIR)/Application Support/obs-studio/plugins"
@@ -67,7 +66,19 @@ function(set_target_properties_plugin target)
   install(TARGETS ${target} LIBRARY DESTINATION .)
   install(FILES "$<TARGET_BUNDLE_DIR:${target}>.dsym" CONFIGURATIONS Release DESTINATION . OPTIONAL)
 
+  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/installer-resources")
   configure_file(cmake/macos/resources/distribution.in "${CMAKE_CURRENT_BINARY_DIR}/distribution" @ONLY)
+  configure_file(
+    cmake/macos/resources/welcome.html.in
+    "${CMAKE_CURRENT_BINARY_DIR}/installer-resources/welcome.html"
+    @ONLY
+  )
+  configure_file(
+    cmake/macos/resources/conclusion.html.in
+    "${CMAKE_CURRENT_BINARY_DIR}/installer-resources/conclusion.html"
+    @ONLY
+  )
+  configure_file(LICENSE "${CMAKE_CURRENT_BINARY_DIR}/installer-resources/LICENSE.txt" COPYONLY)
   configure_file(cmake/macos/resources/create-package.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/create-package.cmake" @ONLY)
   install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/create-package.cmake")
 endfunction()
@@ -77,6 +88,7 @@ function(target_install_resources target)
   message(DEBUG "Installing resources for target ${target}...")
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data")
     file(GLOB_RECURSE data_files "${CMAKE_CURRENT_SOURCE_DIR}/data/*")
+    list(FILTER data_files EXCLUDE REGEX "/(\\._[^/]+|\\.DS_Store)$")
     foreach(data_file IN LISTS data_files)
       cmake_path(
         RELATIVE_PATH
