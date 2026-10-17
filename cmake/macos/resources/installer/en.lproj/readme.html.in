@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root { --text: #1d1d1f; --muted: #6e6e73; --card: rgba(0, 0, 0, 0.04); --line: rgba(0, 0, 0, 0.09); --accent: #0f9d6a; }
+    @media (prefers-color-scheme: dark) {
+      :root { --text: #f5f5f7; --muted: #a1a1a6; --card: rgba(255, 255, 255, 0.07); --line: rgba(255, 255, 255, 0.13); --accent: #34d399; }
+    }
+    body { font: 12.5px/1.45 -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; color: var(--text); margin: 0 2px; }
+    h1 { font-size: 19px; font-weight: 700; margin: 2px 0 2px; }
+    h1 .ver { font-weight: 400; color: var(--muted); }
+    .lead { color: var(--muted); margin: 0 0 10px; }
+    .box { padding: 7px 10px; background: var(--card); border: 1px solid var(--line); border-radius: 7px; }
+    .ltr { direction: ltr; unicode-bidi: embed; }
+    code { font: 11px "SF Mono", Menlo, monospace; direction: ltr; unicode-bidi: embed; }
+    b { font-weight: 600; }
+    ul.f { margin: 0 0 10px; padding-left: 20px; }
+    ul.f li { margin: 0 0 6px; }
+    h2 { font-size: 11.5px; font-weight: 600; color: var(--muted); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 3px 0; vertical-align: top; }
+    td:first-child { color: var(--muted); width: 30%; }
+    p { margin: 0; }
+  </style>
+</head>
+<body>
+  <h1>What&rsquo;s new in @CMAKE_PROJECT_VERSION@</h1>
+  <ul class="f">
+    <li><b>Solid hair in live video.</b> The hair band no longer shows a checkerboard or see-through halo; the new <b>Hair Density</b> control works like Ultra Key&rsquo;s clip.</li>
+    <li><b>Stable hair in live video.</b> Strands no longer twinkle or leave black specks: temporal filtering holds them through noisy frames, broken strands stay continuous, and they take the real hair colour.</li>
+    <li><b>Flyaway hair is kept.</b> An Ultra Key style colour-difference matte, guided by brightness, recovers fine strands whose colour the camera discards.</li>
+  </ul>
+  <h2>Requirements</h2>
+  <table>
+    <tr><td>macOS</td><td>@CMAKE_OSX_DEPLOYMENT_TARGET@ or later, Apple silicon or Intel</td></tr>
+    <tr><td>OBS Studio</td><td>31 or later</td></tr>
+    <tr><td>Location</td><td><code>~/Library/Application Support/obs-studio/plugins</code></td></tr>
+  </table>
+  <h2>Privacy &amp; removal</h2>
+  <p>Person and face analysis runs locally; camera frames never leave your Mac. To uninstall, quit OBS Studio and move <code>smart-chroma-key.plugin</code> from the folder above to the Trash.</p>
+</body>
+</html>

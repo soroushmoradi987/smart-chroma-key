@@ -34,6 +34,28 @@ if(ENABLE_QT)
   )
 endif()
 
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c)
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c src/semantic-mask.h)
+
+if(OS_MACOS)
+  enable_language(OBJC)
+  find_library(COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
+  find_library(COREVIDEO_FRAMEWORK CoreVideo REQUIRED)
+  find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
+  find_library(IMAGEIO_FRAMEWORK ImageIO REQUIRED)
+  find_library(VISION_FRAMEWORK Vision REQUIRED)
+  target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/semantic-mask-macos.m)
+  target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:OBJC>:-fobjc-arc>")
+  target_link_libraries(
+    ${CMAKE_PROJECT_NAME}
+    PRIVATE
+      ${COREGRAPHICS_FRAMEWORK}
+      ${COREVIDEO_FRAMEWORK}
+      ${FOUNDATION_FRAMEWORK}
+      ${IMAGEIO_FRAMEWORK}
+      ${VISION_FRAMEWORK}
+  )
+else()
+  target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/semantic-mask-stub.c)
+endif()
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

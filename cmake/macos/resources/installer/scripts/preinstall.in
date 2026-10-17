@@ -1,0 +1,17 @@
+#!/bin/sh
+# Remove the previous plugin bundle so files dropped in this release cannot
+# linger after an upgrade. For this per-user package Installer runs the script
+# as the user and passes the home folder as $2.
+set -u
+
+home=${2:-}
+if [ -z "${home}" ] || [ "${home}" = "/" ] || [ ! -d "${home}" ]; then
+  home=${HOME:-}
+fi
+[ -n "${home}" ] && [ "${home}" != "/" ] || exit 0
+
+plugin="${home%/}/Library/Application Support/obs-studio/plugins/@CMAKE_PROJECT_NAME@.plugin"
+if [ -d "${plugin}" ] && [ ! -L "${plugin}" ]; then
+  /bin/rm -rf -- "${plugin}"
+fi
+exit 0

@@ -54,26 +54,55 @@ function(_setup_obs_studio)
 
   if(OS_WINDOWS)
     set(_cmake_generator "${CMAKE_GENERATOR}")
-    set(_cmake_arch "-A ${arch},version=${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
-    set(_cmake_extra "-DCMAKE_SYSTEM_VERSION=${CMAKE_SYSTEM_VERSION} -DCMAKE_ENABLE_SCRIPTING=OFF")
+    set(_cmake_arch -A "${arch},version=${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")
+    set(_cmake_extra "-DCMAKE_SYSTEM_VERSION=${CMAKE_SYSTEM_VERSION}" -DENABLE_SCRIPTING=OFF)
   elseif(OS_MACOS)
     set(_cmake_generator "Xcode")
-    set(_cmake_arch "-DCMAKE_OSX_ARCHITECTURES:STRING='arm64;x86_64'")
+    # Refresh this project's find_library results as well as the nested cache.
+    get_cmake_property(_cache_variables CACHE_VARIABLES)
+    foreach(_variable IN LISTS _cache_variables)
+      get_property(_type CACHE "${_variable}" PROPERTY TYPE)
+      if(_type MATCHES "^(PATH|FILEPATH)$" AND "${${_variable}}" MATCHES "MacOSX[^/]*\\.sdk/"
+         AND NOT EXISTS "${${_variable}}")
+        unset(${_variable} CACHE)
+      endif()
+    endforeach()
+    # execute_process does not use a shell: embedded single quotes are literal.
+    set(_cmake_arch "-DCMAKE_OSX_ARCHITECTURES:STRING=arm64\;x86_64")
     set(_cmake_extra "-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    # Xcode upgrades remove old SDKs, but find_package paths survive in the
+    # nested OBS cache even when the plugin itself is configured with --fresh.
+    set(_obs_cache "${dependencies_dir}/${_obs_destination}/build_${arch}/CMakeCache.txt")
+    if(EXISTS "${_obs_cache}")
+      file(STRINGS "${_obs_cache}" _sdk_entries REGEX ":(PATH|FILEPATH)=.*MacOSX[^/]*\\.sdk/")
+      foreach(_entry IN LISTS _sdk_entries)
+        string(REGEX REPLACE "^[^=]*=" "" _sdk_path "${_entry}")
+        if(NOT EXISTS "${_sdk_path}")
+          message(STATUS "Refreshing OBS cache: SDK path no longer exists: ${_sdk_path}")
+          set(_is_fresh --fresh)
+          break()
+        endif()
+      endforeach()
+    endif()
   endif()
 
   message(STATUS "Configure ${label} (${arch})")
   execute_process(
     COMMAND
       "${CMAKE_COMMAND}" -S "${dependencies_dir}/${_obs_destination}" -B
-      "${dependencies_dir}/${_obs_destination}/build_${arch}" -G ${_cmake_generator} "${_cmake_arch}"
+      "${dependencies_dir}/${_obs_destination}/build_${arch}" -G "${_cmake_generator}" ${_cmake_arch}
       -DOBS_CMAKE_VERSION:STRING=3.0.0 -DENABLE_PLUGINS:BOOL=OFF -DENABLE_FRONTEND:BOOL=OFF
-      -DOBS_VERSION_OVERRIDE:STRING=${_obs_version} "-DCMAKE_PREFIX_PATH='${CMAKE_PREFIX_PATH}'" ${_is_fresh}
+      -DOBS_VERSION_OVERRIDE:STRING=${_obs_version} "-DCMAKE_PREFIX_PATH:STRING=${CMAKE_PREFIX_PATH}" ${_is_fresh}
       ${_cmake_extra}
     RESULT_VARIABLE _process_result
-    COMMAND_ERROR_IS_FATAL ANY
-    OUTPUT_QUIET
+    OUTPUT_VARIABLE _configure_stdout
+    ERROR_VARIABLE _configure_stderr
   )
+  set(_configure_log "${dependencies_dir}/obs-configure-${arch}.log")
+  file(WRITE "${_configure_log}" "${_configure_stdout}\n${_configure_stderr}")
+  if(NOT _process_result STREQUAL "0")
+    message(FATAL_ERROR "OBS configure failed (${_process_result}). Log: ${_configure_log}\n${_configure_stdout}\n${_configure_stderr}")
+  endif()
   message(STATUS "Configure ${label} (${arch}) - done")
 
   message(STATUS "Build ${label} (Debug - ${arch})")
@@ -94,7 +123,7 @@ function(_setup_obs_studio)
     COMMAND_ERROR_IS_FATAL ANY
     OUTPUT_QUIET
   )
-  message(STATUS "Build ${label} (Reelase - ${arch}) - done")
+  message(STATUS "Build ${label} (Release - ${arch}) - done")
 
   message(STATUS "Install ${label} (${arch})")
   execute_process(

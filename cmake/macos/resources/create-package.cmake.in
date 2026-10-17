@@ -26,8 +26,9 @@ make_directory("$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/temp")
 
 execute_process(
   COMMAND
-    "${CMAKE_COMMAND}" -E env COPYFILE_DISABLE=1 /usr/bin/pkgbuild --identifier '@MACOS_BUNDLEID@' --version
-    '@CMAKE_PROJECT_VERSION@' --root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/package"
+    "${CMAKE_COMMAND}" -E env COPYFILE_DISABLE=1 /usr/bin/pkgbuild --identifier @MACOS_BUNDLEID@ --version
+    @CMAKE_PROJECT_VERSION@ --root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/package" --component-plist
+    "@CMAKE_CURRENT_BINARY_DIR@/installer-component.plist" --scripts "@CMAKE_CURRENT_BINARY_DIR@/installer-scripts"
     "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/temp/@CMAKE_PROJECT_NAME@.pkg"
   COMMAND_ERROR_IS_FATAL ANY
 )

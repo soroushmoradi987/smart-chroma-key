@@ -9,6 +9,8 @@
 !/scripts
 !/scripts/**
 !/src
+!/tests
+!/tests/**
 !.clang-format
 !.gersemirc
 !.gitignore

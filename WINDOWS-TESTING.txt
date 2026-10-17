@@ -1,0 +1,18 @@
+Smart Chroma Key 1.3.7 - Windows x64 test build
+
+This is the approved chroma-key baseline. It does not include RVM.
+Use 64-bit OBS Studio; the build targets OBS 31.1.1.
+Close OBS, run the installer, then restart OBS.
+The installer places the plugin under ProgramData/obs-studio/plugins.
+Add Smart Chroma Key under the camera source's Effect Filters.
+Select the correct screen type and run Analyze Screen Now.
+Apple Vision person/face protection is available only on macOS.
+This test installer is unsigned; Windows may show a publisher warning.
+
+Please test:
+- Installation, filter visibility, and uninstallation.
+- Green and blue screens, fine hair, dense hair, and moving hands.
+- Hair flicker and body halos against white and black backgrounds.
+- OBS frame/render time with the filter enabled and disabled.
+Report Windows/OBS versions, GPU, camera resolution/FPS, settings,
+and a short example of any visual issue.

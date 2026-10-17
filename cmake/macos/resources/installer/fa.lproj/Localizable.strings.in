@@ -1,0 +1,11 @@
+"DISTRIBUTION_TITLE" = "@PLUGIN_DISPLAY_NAME@ @CMAKE_PROJECT_VERSION@";
+"CHOICE_TITLE" = "@PLUGIN_DISPLAY_NAME@ برای OBS Studio";
+"CHOICE_DESCRIPTION" = "کیِر حرفه‌ای پرده‌ی سبز و آبی با محافظت هوشمند از فرد.";
+"MACOS_TOO_OLD_TITLE" = "به macOS نسخه‌ی @CMAKE_OSX_DEPLOYMENT_TARGET@ یا جدیدتر نیاز است.";
+"MACOS_TOO_OLD_MESSAGE" = "macOS را از تنظیمات سیستم به‌روز کنید و دوباره این نصب‌کننده را اجرا کنید.";
+"OBS_RUNNING_TITLE" = "OBS Studio در حال اجراست.";
+"OBS_RUNNING_MESSAGE" = "پیش از ادامه، OBS Studio را ببندید. نسخه‌ی جدید در اجرای بعدی OBS Studio بارگذاری می‌شود.";
+"OBS_TOO_OLD_TITLE" = "OBS Studio نسخه‌ی ۳۱ یا جدیدتر توصیه می‌شود.";
+"OBS_TOO_OLD_MESSAGE" = "OBS Studio نصب‌شده قدیمی‌تر از نسخه‌ی ۳۱ است و ممکن است این افزونه را بارگذاری نکند. OBS Studio را از obsproject.com به‌روز کنید.";
+"OBS_MISSING_TITLE" = "OBS Studio در پوشه‌ی Applications پیدا نشد.";
+"OBS_MISSING_MESSAGE" = "می‌توانید ادامه دهید؛ افزونه پس از نصب OBS Studio نسخه‌ی ۳۱ یا جدیدتر در دسترس خواهد بود.";

@@ -1,0 +1,11 @@
+"DISTRIBUTION_TITLE" = "@PLUGIN_DISPLAY_NAME@ @CMAKE_PROJECT_VERSION@";
+"CHOICE_TITLE" = "@PLUGIN_DISPLAY_NAME@ for OBS Studio";
+"CHOICE_DESCRIPTION" = "Studio-grade green and blue screen keyer with AI person protection.";
+"MACOS_TOO_OLD_TITLE" = "macOS @CMAKE_OSX_DEPLOYMENT_TARGET@ or later is required.";
+"MACOS_TOO_OLD_MESSAGE" = "Update macOS in System Settings, then run this installer again.";
+"OBS_RUNNING_TITLE" = "OBS Studio is running.";
+"OBS_RUNNING_MESSAGE" = "Quit OBS Studio before continuing. The new version loads the next time OBS Studio starts.";
+"OBS_TOO_OLD_TITLE" = "OBS Studio 31 or later is recommended.";
+"OBS_TOO_OLD_MESSAGE" = "The installed OBS Studio is older than version 31 and may not load this plugin. Update OBS Studio from obsproject.com.";
+"OBS_MISSING_TITLE" = "OBS Studio was not found in Applications.";
+"OBS_MISSING_MESSAGE" = "You can continue; the plugin will be available once OBS Studio 31 or later is installed.";

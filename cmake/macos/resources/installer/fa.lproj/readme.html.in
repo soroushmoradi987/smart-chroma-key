@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root { --text: #1d1d1f; --muted: #6e6e73; --card: rgba(0, 0, 0, 0.04); --line: rgba(0, 0, 0, 0.09); --accent: #0f9d6a; }
+    @media (prefers-color-scheme: dark) {
+      :root { --text: #f5f5f7; --muted: #a1a1a6; --card: rgba(255, 255, 255, 0.07); --line: rgba(255, 255, 255, 0.13); --accent: #34d399; }
+    }
+    body { font: 12.5px/1.65 -apple-system, "SF Arabic", "Geeza Pro", sans-serif; color: var(--text); margin: 0 2px; direction: rtl; text-align: right; }
+    h1 { font-size: 19px; font-weight: 700; margin: 2px 0 2px; }
+    h1 .ver { font-weight: 400; color: var(--muted); }
+    .lead { color: var(--muted); margin: 0 0 10px; }
+    .box { padding: 7px 10px; background: var(--card); border: 1px solid var(--line); border-radius: 7px; }
+    .ltr { direction: ltr; unicode-bidi: embed; }
+    code { font: 11px "SF Mono", Menlo, monospace; direction: ltr; unicode-bidi: embed; }
+    b { font-weight: 600; }
+    ul.f { margin: 0 0 10px; padding-right: 20px; padding-left: 0; }
+    ul.f li { margin: 0 0 6px; }
+    h2 { font-size: 11.5px; font-weight: 600; color: var(--muted); margin: 10px 0 4px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 3px 0; vertical-align: top; }
+    td:first-child { color: var(--muted); width: 30%; }
+    p { margin: 0; }
+  </style>
+</head>
+<body>
+  <h1>تازه‌های نسخه‌ی <span class="ltr">@CMAKE_PROJECT_VERSION@</span></h1>
+  <ul class="f">
+    <li><b>موی یکدست در ویدئوی زنده.</b> نوار مو دیگر شطرنجی یا هاله‌ی شفاف ندارد؛ کنترل جدید <b class="ltr">Hair Density</b> مثل Clip در <span class="ltr">Ultra Key</span> عمل می‌کند.</li>
+    <li><b>موی پایدار در ویدئوی زنده.</b> تارها دیگر چشمک نمی‌زنند و برفک مشکی ندارند: فیلتر زمانی آن‌ها را در فریم‌های پرنویز نگه می‌دارد، تارها پیوسته می‌مانند و رنگ واقعی مو را می‌گیرند.</li>
+    <li><b>حفظ تارهای پراکنده‌ی مو.</b> ماتِ تفاضل رنگ به سبک <span class="ltr">Ultra Key</span> با کمک روشنایی، تارهای ظریفی را که دوربین رنگشان را حذف می‌کند بازمی‌گرداند.</li>
+  </ul>
+  <h2>پیش‌نیازها</h2>
+  <table>
+    <tr><td><span class="ltr">macOS</span></td><td><span class="ltr">@CMAKE_OSX_DEPLOYMENT_TARGET@</span> یا جدیدتر، <span class="ltr">Apple silicon</span> یا <span class="ltr">Intel</span></td></tr>
+    <tr><td><span class="ltr">OBS Studio</span></td><td>نسخه‌ی ۳۱ یا جدیدتر</td></tr>
+    <tr><td>محل نصب</td><td><code>~/Library/Application Support/obs-studio/plugins</code></td></tr>
+  </table>
+  <h2>حریم خصوصی و حذف</h2>
+  <p>تحلیل فرد و چهره به‌صورت محلی انجام می‌شود و تصویر دوربین از مک خارج نمی‌شود. برای حذف، <span class="ltr">OBS Studio</span> را ببندید و <code>smart-chroma-key.plugin</code> را از پوشه‌ی بالا به سطل زباله ببرید.</p>
+</body>
+</html>

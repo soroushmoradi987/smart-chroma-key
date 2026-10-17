@@ -1,37 +1,80 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
-<installer-gui-script minSpecVersion="1.0">
+<installer-gui-script minSpecVersion="2">
     <options
         rootVolumeOnly="true"
         hostArchitectures="arm64,x86_64"
         customize="never"
+        require-scripts="false"
         allow-external-scripts="no" />
     <domains enable_currentUserHome="true" enable_anywhere="false" enable_localSystem="false" />
-    <title>@PLUGIN_DISPLAY_NAME@</title>
+    <title>DISTRIBUTION_TITLE</title>
+    <background file="background.tiff" mime-type="image/tiff" alignment="bottomleft" scaling="none" />
+    <background-darkAqua file="background-dark.tiff" mime-type="image/tiff" alignment="bottomleft" scaling="none" />
     <welcome file="welcome.html" mime-type="text/html" />
+    <readme file="readme.html" mime-type="text/html" />
     <license file="LICENSE.txt" mime-type="text/plain" />
     <conclusion file="conclusion.html" mime-type="text/html" />
     <choices-outline>
         <line choice="obs-plugin" />
     </choices-outline>
-    <choice id="obs-plugin" title="@PLUGIN_DISPLAY_NAME@" description="Professional green and blue screen removal for OBS Studio">
+    <choice id="obs-plugin" title="CHOICE_TITLE" description="CHOICE_DESCRIPTION">
         <pkg-ref id="@MACOS_BUNDLEID@" />
     </choice>
     <pkg-ref id="@MACOS_BUNDLEID@" version="@CMAKE_PROJECT_VERSION@">#@CMAKE_PROJECT_NAME@.pkg</pkg-ref>
     <installation-check script="installCheck();" />
     <script>
-        function installCheck() {
-            var macOSVersion = system.version.ProductVersion
+    <![CDATA[
+        var OBS_BUNDLE_ID = 'com.obsproject.obs-studio';
+        var OBS_MINIMUM_VERSION = '31.0';
 
-            if (system.compareVersions(macOSVersion, '@CMAKE_OSX_DEPLOYMENT_TARGET@') == -1) {
-                my.result.title = system.localizedStandardStringWithFormat(
-                                    'InstallationCheckError',
-                                    system.localizedString('DISTRIBUTION_TITLE')
-                                  );
-                my.result.message = ' ';
-                my.result.type = 'Fatal';
+        function report(type, key) {
+            my.result.type = type;
+            my.result.title = system.localizedString(key + '_TITLE');
+            my.result.message = system.localizedString(key + '_MESSAGE');
+            return false;
+        }
+
+        function obsIsRunning() {
+            try {
+                var running = system.applications.fromIdentifier(OBS_BUNDLE_ID);
+                if (!running) {
+                    return false;
+                }
+                return running.length === undefined || running.length > 0;
+            } catch (error) {
                 return false;
+            }
+        }
+
+        // Returns null when OBS is absent and '' when its version is unreadable.
+        function installedObsVersion() {
+            try {
+                var info = system.files.plistAtPath('/Applications/OBS.app/Contents/Info.plist');
+                if (!info) {
+                    return null;
+                }
+                return info.CFBundleShortVersionString || '';
+            } catch (error) {
+                return '';
+            }
+        }
+
+        function installCheck() {
+            if (system.compareVersions(system.version.ProductVersion, '@CMAKE_OSX_DEPLOYMENT_TARGET@') < 0) {
+                return report('Fatal', 'MACOS_TOO_OLD');
+            }
+            if (obsIsRunning()) {
+                return report('Warning', 'OBS_RUNNING');
+            }
+            var obsVersion = installedObsVersion();
+            if (obsVersion === null) {
+                return report('Warning', 'OBS_MISSING');
+            }
+            if (obsVersion !== '' && system.compareVersions(obsVersion, OBS_MINIMUM_VERSION) < 0) {
+                return report('Warning', 'OBS_TOO_OLD');
             }
             return true;
         }
+    ]]>
     </script>
 </installer-gui-script>

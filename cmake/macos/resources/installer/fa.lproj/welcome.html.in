@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root { --text: #1d1d1f; --muted: #6e6e73; --card: rgba(0, 0, 0, 0.04); --line: rgba(0, 0, 0, 0.09); --accent: #0f9d6a; }
+    @media (prefers-color-scheme: dark) {
+      :root { --text: #f5f5f7; --muted: #a1a1a6; --card: rgba(255, 255, 255, 0.07); --line: rgba(255, 255, 255, 0.13); --accent: #34d399; }
+    }
+    body { font: 12.5px/1.65 -apple-system, "SF Arabic", "Geeza Pro", sans-serif; color: var(--text); margin: 0 2px; direction: rtl; text-align: right; }
+    h1 { font-size: 19px; font-weight: 700; margin: 2px 0 2px; }
+    h1 .ver { font-weight: 400; color: var(--muted); }
+    .lead { color: var(--muted); margin: 0 0 10px; }
+    .box { padding: 7px 10px; background: var(--card); border: 1px solid var(--line); border-radius: 7px; }
+    .ltr { direction: ltr; unicode-bidi: embed; }
+    code { font: 11px "SF Mono", Menlo, monospace; direction: ltr; unicode-bidi: embed; }
+    b { font-weight: 600; }
+    ul.f { margin: 0 0 10px; padding-right: 20px; padding-left: 0; }
+    ul.f li { margin: 0 0 6px; }
+  </style>
+</head>
+<body>
+  <h1><span class="ltr">@PLUGIN_DISPLAY_NAME@</span> <span class="ver ltr">@CMAKE_PROJECT_VERSION@</span></h1>
+  <p class="lead">کیِینگ حرفه‌ای پرده‌ی سبز و آبی در حد استودیو برای <span class="ltr">OBS Studio</span>.</p>
+  <ul class="f">
+    <li><b>لبه‌ی طبیعی مو</b> &ndash; تارهای ظریف نرم می‌مانند؛ بدون لبه‌ی پله‌ای یا شطرنجی.</li>
+    <li><b>محافظت هوشمند از فرد</b> &ndash; <span class="ltr">Apple Vision</span> از مجری و لباس سبز یا آبی محافظت می‌کند؛ کاملاً روی همین مک.</li>
+    <li><b>رنگ تمیز، حرکت پایدار</b> &ndash; پاک‌سازی رنگ لبه، حذف اسپیل و کاهش نویز وابسته به حرکت.</li>
+    <li><b>بومی روی همه‌ی مک‌ها</b> &ndash; یونیورسال برای <span class="ltr">Apple silicon</span> و <span class="ltr">Intel</span> با شتاب‌دهی <span class="ltr">GPU</span>.</li>
+  </ul>
+  <p class="box">پیش از ادامه، <span class="ltr">OBS Studio</span> را ببندید. افزونه فقط برای حساب کاربری شما نصب می‌شود و رمز مدیر سیستم لازم نیست.</p>
+</body>
+</html>

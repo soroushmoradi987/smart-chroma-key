@@ -1,0 +1,79 @@
+name: Windows 1.3.7 approved baseline
+on:
+  push:
+    branches: [build/windows-1.3.7-approved]
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Build And Package (ZIP + EXE)
+        shell: pwsh
+        run: |
+          .github/scripts/Build-Installer-Windows.ps1 -Target x64 -Configuration Release -InstallDependencies
+
+      - name: Smoke Test Windows Installer
+        shell: pwsh
+        run: |
+          $Installer = Get-Item release/*-installer.exe | Select-Object -First 1
+          if ( $null -eq $Installer -or $Installer.Length -le 0 ) {
+            throw 'Windows installer was not created.'
+          }
+
+          $PluginRoot = Join-Path $env:RUNNER_TEMP 'smart-chroma-key-test'
+
+          $InstallerProcess = Start-Process -FilePath $Installer.FullName `
+            -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"${PluginRoot}`"") `
+            -Wait -PassThru
+          if ( $InstallerProcess.ExitCode -ne 0 ) {
+            throw "Installer exited with code $($InstallerProcess.ExitCode)."
+          }
+
+          $PluginDll = Join-Path $PluginRoot 'bin/64bit/smart-chroma-key.dll'
+          $PluginEffect = Join-Path $PluginRoot 'data/smart-chroma-key.effect'
+          if ( ! ( Test-Path $PluginDll ) -or ! ( Test-Path $PluginEffect ) ) {
+            throw 'Installed plugin payload is incomplete.'
+          }
+
+          $Uninstaller = Get-Item (Join-Path $PluginRoot 'unins*.exe') | Select-Object -First 1
+          $UninstallerProcess = Start-Process -FilePath $Uninstaller.FullName `
+            -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') `
+            -Wait -PassThru
+          if ( $UninstallerProcess.ExitCode -ne 0 ) {
+            throw "Uninstaller exited with code $($UninstallerProcess.ExitCode)."
+          }
+          if ( ( Test-Path $PluginDll ) -or ( Test-Path $PluginEffect ) ) {
+            throw 'Uninstaller left plugin files behind.'
+          }
+
+      - name: Record checksums and build provenance
+        shell: pwsh
+        run: |
+          $Files = Get-ChildItem release -File | Where-Object { $_.Extension -in '.exe', '.zip' }
+          $Files | ForEach-Object {
+            $Hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$Hash  $($_.Name)"
+          } | Set-Content release/SHA256SUMS.txt
+          @("Version: 1.3.7", "Source commit: $env:GITHUB_SHA", "Run: https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID", "Checks: build, silent install, payload presence, uninstall", "Runtime camera/D3D quality: requires tester validation", "Apple Vision protection: macOS only", "RVM: not included", "Authenticode: unsigned") | Set-Content release/BUILD-INFO.txt
+          Copy-Item WINDOWS-TESTING.txt release/WINDOWS-TESTING.txt
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-chroma-key-1.3.7-windows-x64
+          if-no-files-found: error
+          path: |
+            release/*.zip
+            release/*-installer.exe
+            release/SHA256SUMS.txt
+            release/BUILD-INFO.txt
+            release/WINDOWS-TESTING.txt

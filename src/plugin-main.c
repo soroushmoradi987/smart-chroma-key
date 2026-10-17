@@ -8,6 +8,7 @@ Copyright (C) 2026 Soroush Moradi
 #include <graphics/vec2.h>
 #include <graphics/vec4.h>
 #include <plugin-support.h>
+#include "semantic-mask.h"
 #include <math.h>
 
 OBS_DECLARE_MODULE()
@@ -22,8 +23,13 @@ enum smart_chroma_screen_type {
 struct smart_chroma_effect_params {
 	gs_eparam_t *texel_size;
 	gs_eparam_t *previous_image;
+	gs_eparam_t *previous_input;
 	gs_eparam_t *history_valid;
 	gs_eparam_t *temporal_stability;
+	gs_eparam_t *semantic_mask;
+	gs_eparam_t *semantic_mask_valid;
+	gs_eparam_t *face_rect;
+	gs_eparam_t *face_valid;
 	gs_eparam_t *screen_type;
 	gs_eparam_t *key_color;
 	gs_eparam_t *base_key;
@@ -31,6 +37,7 @@ struct smart_chroma_effect_params {
 	gs_eparam_t *background_clean;
 	gs_eparam_t *hair_detail;
 	gs_eparam_t *hair_softness;
+	gs_eparam_t *hair_density;
 	gs_eparam_t *edge_blur;
 	gs_eparam_t *edge_shrink;
 	gs_eparam_t *edge_grow;
@@ -65,6 +72,7 @@ struct smart_chroma_data {
 	/* Hair Detail */
 	float hair_detail;
 	float hair_softness;
+	float hair_density;
 
 	/* Edge Refinement */
 	float edge_blur;
@@ -89,6 +97,7 @@ struct smart_chroma_data {
 	/* Key Processing */
 	float key_sat_boost;
 	float temporal_stability;
+	bool semantic_enabled;
 
 	/* Opacity */
 	float opacity;
@@ -100,8 +109,26 @@ struct smart_chroma_data {
 	uint32_t at_width;
 	uint32_t at_height;
 
+	/* Apple Vision person matte and face-guided hair region. Inference is
+	 * asynchronous; only staging and mask upload happen on the render thread. */
+	struct sc_semantic_segmenter *semantic_segmenter;
+	gs_texrender_t *semantic_texrender;
+	gs_stagesurf_t *semantic_stagesurf;
+	gs_texture_t *semantic_mask_texture;
+	uint32_t semantic_capture_width;
+	uint32_t semantic_capture_height;
+	uint32_t semantic_mask_width;
+	uint32_t semantic_mask_height;
+	bool semantic_stage_pending;
+	bool semantic_mask_valid;
+	struct vec4 semantic_face_rect;
+	bool semantic_face_valid;
+	uint32_t semantic_face_misses;
+
 	/* Motion-aware temporal stabilization uses ping-pong output history. */
 	gs_texrender_t *history[2];
+	gs_texrender_t *input_history[2];
+	gs_texture_t *empty_texture;
 	uint32_t history_width;
 	uint32_t history_height;
 	uint32_t history_index;
@@ -125,8 +152,13 @@ static bool smart_chroma_cache_effect_params(struct smart_chroma_data *f)
 
 	CACHE_EFFECT_PARAM(texel_size, "texel_size");
 	CACHE_EFFECT_PARAM(previous_image, "previous_image");
+	CACHE_EFFECT_PARAM(previous_input, "previous_input");
 	CACHE_EFFECT_PARAM(history_valid, "HistoryValid");
 	CACHE_EFFECT_PARAM(temporal_stability, "TemporalStability");
+	CACHE_EFFECT_PARAM(semantic_mask, "semantic_mask");
+	CACHE_EFFECT_PARAM(semantic_mask_valid, "SemanticMaskValid");
+	CACHE_EFFECT_PARAM(face_rect, "FaceRect");
+	CACHE_EFFECT_PARAM(face_valid, "FaceValid");
 	CACHE_EFFECT_PARAM(screen_type, "ScreenType");
 	CACHE_EFFECT_PARAM(key_color, "KeyColor");
 	CACHE_EFFECT_PARAM(base_key, "BaseKey");
@@ -134,6 +166,7 @@ static bool smart_chroma_cache_effect_params(struct smart_chroma_data *f)
 	CACHE_EFFECT_PARAM(background_clean, "BackgroundClean");
 	CACHE_EFFECT_PARAM(hair_detail, "HairDetail");
 	CACHE_EFFECT_PARAM(hair_softness, "HairSoftness");
+	CACHE_EFFECT_PARAM(hair_density, "HairDensity");
 	CACHE_EFFECT_PARAM(edge_blur, "EdgeBlur");
 	CACHE_EFFECT_PARAM(edge_shrink, "EdgeShrink");
 	CACHE_EFFECT_PARAM(edge_grow, "EdgeGrow");
@@ -195,6 +228,7 @@ static void smart_chroma_update(void *data, obs_data_t *settings)
 
 	f->hair_detail = (float)obs_data_get_double(settings, "hair_detail");
 	f->hair_softness = (float)obs_data_get_double(settings, "hair_softness");
+	f->hair_density = clamp_float((float)obs_data_get_double(settings, "hair_density"), 0.0f, 1.0f);
 
 	f->edge_blur = (float)obs_data_get_double(settings, "edge_blur");
 	f->edge_shrink = fminf(fmaxf((float)obs_data_get_double(settings, "edge_shrink"), 0.0f), 0.999f);
@@ -216,6 +250,7 @@ static void smart_chroma_update(void *data, obs_data_t *settings)
 
 	f->key_sat_boost = (float)obs_data_get_double(settings, "key_sat_boost");
 	f->temporal_stability = clamp_float((float)obs_data_get_double(settings, "temporal_stability"), 0.0f, 1.0f);
+	f->semantic_enabled = obs_data_get_bool(settings, "semantic_protection");
 
 	f->opacity = fminf(fmaxf((float)obs_data_get_double(settings, "opacity"), 0.0f), 1.0f);
 	f->history_valid = false;
@@ -236,14 +271,23 @@ static void *smart_chroma_create(obs_data_t *settings, obs_source_t *context)
 	obs_enter_graphics();
 	f->effect = path ? gs_effect_create_from_file(path, NULL) : NULL;
 	f->texrender = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
-	f->history[0] = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
-	f->history[1] = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->semantic_texrender = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->history[0] = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
+	f->history[1] = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
+	f->input_history[0] = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	f->input_history[1] = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	const uint8_t empty_pixel[4] = {0};
+	const uint8_t *empty_data = empty_pixel;
+	f->empty_texture = gs_texture_create(1, 1, GS_RGBA, 1, &empty_data, 0);
 	if (f->effect && !smart_chroma_cache_effect_params(f)) {
 		gs_effect_destroy(f->effect);
 		f->effect = NULL;
 	}
 	obs_leave_graphics();
 	bfree(path);
+	f->semantic_segmenter = sc_semantic_segmenter_create();
+	if (f->semantic_segmenter)
+		obs_log(LOG_INFO, "Apple Vision person and face protection is available");
 
 	if (!f->effect) {
 		obs_log(LOG_ERROR,
@@ -257,6 +301,7 @@ static void *smart_chroma_create(obs_data_t *settings, obs_source_t *context)
 static void smart_chroma_destroy(void *data)
 {
 	struct smart_chroma_data *f = data;
+	sc_semantic_segmenter_destroy(f->semantic_segmenter);
 	obs_enter_graphics();
 	if (f->effect)
 		gs_effect_destroy(f->effect);
@@ -264,12 +309,150 @@ static void smart_chroma_destroy(void *data)
 		gs_texrender_destroy(f->texrender);
 	if (f->stagesurf)
 		gs_stagesurface_destroy(f->stagesurf);
+	if (f->semantic_texrender)
+		gs_texrender_destroy(f->semantic_texrender);
+	if (f->semantic_stagesurf)
+		gs_stagesurface_destroy(f->semantic_stagesurf);
+	if (f->semantic_mask_texture)
+		gs_texture_destroy(f->semantic_mask_texture);
 	if (f->history[0])
 		gs_texrender_destroy(f->history[0]);
 	if (f->history[1])
 		gs_texrender_destroy(f->history[1]);
+	if (f->input_history[0])
+		gs_texrender_destroy(f->input_history[0]);
+	if (f->input_history[1])
+		gs_texrender_destroy(f->input_history[1]);
+	if (f->empty_texture)
+		gs_texture_destroy(f->empty_texture);
 	obs_leave_graphics();
 	bfree(f);
+}
+
+static void semantic_take_latest_result(struct smart_chroma_data *f)
+{
+	struct sc_semantic_result result;
+	if (!sc_semantic_segmenter_take_result(f->semantic_segmenter, &result))
+		return;
+
+	if (result.width == 0 || result.height == 0 || !result.mask) {
+		sc_semantic_result_release(&result);
+		return;
+	}
+
+	if (f->semantic_mask_texture &&
+	    (f->semantic_mask_width != result.width || f->semantic_mask_height != result.height)) {
+		gs_texture_destroy(f->semantic_mask_texture);
+		f->semantic_mask_texture = NULL;
+	}
+
+	if (!f->semantic_mask_texture) {
+		const uint8_t *initial_data = result.mask;
+		f->semantic_mask_texture =
+			gs_texture_create(result.width, result.height, GS_R8, 1, &initial_data, GS_DYNAMIC);
+	} else {
+		gs_texture_set_image(f->semantic_mask_texture, result.mask, result.linesize, false);
+	}
+
+	if (f->semantic_mask_texture) {
+		f->semantic_mask_width = result.width;
+		f->semantic_mask_height = result.height;
+		f->semantic_mask_valid = true;
+	}
+
+	if (result.face_valid) {
+		f->semantic_face_rect.x = result.face_rect[0];
+		f->semantic_face_rect.y = result.face_rect[1];
+		f->semantic_face_rect.z = result.face_rect[2];
+		f->semantic_face_rect.w = result.face_rect[3];
+		f->semantic_face_valid = true;
+		f->semantic_face_misses = 0;
+	} else if (++f->semantic_face_misses > 12) {
+		f->semantic_face_valid = false;
+	}
+
+	sc_semantic_result_release(&result);
+}
+
+static void semantic_prepare_capture_surface(struct smart_chroma_data *f, uint32_t width, uint32_t height)
+{
+	if (f->semantic_stagesurf && (f->semantic_capture_width != width || f->semantic_capture_height != height)) {
+		gs_stagesurface_destroy(f->semantic_stagesurf);
+		f->semantic_stagesurf = NULL;
+		f->semantic_stage_pending = false;
+	}
+
+	if (!f->semantic_stagesurf)
+		f->semantic_stagesurf = gs_stagesurface_create(width, height, GS_RGBA);
+
+	if (f->semantic_stagesurf) {
+		f->semantic_capture_width = width;
+		f->semantic_capture_height = height;
+	}
+}
+
+static void semantic_update(struct smart_chroma_data *f, obs_source_t *target)
+{
+	if (!f->semantic_segmenter)
+		return;
+
+	semantic_take_latest_result(f);
+	if (!f->semantic_enabled) {
+		f->semantic_mask_valid = false;
+		f->semantic_face_valid = false;
+		f->semantic_stage_pending = false;
+		return;
+	}
+
+	/* Submit the previous frame's asynchronous GPU readback. The bridge copies
+	 * it immediately, so the staging surface can be reused after unmapping. */
+	if (f->semantic_stage_pending && !sc_semantic_segmenter_is_busy(f->semantic_segmenter)) {
+		uint8_t *video_data = NULL;
+		uint32_t linesize = 0;
+		if (gs_stagesurface_map(f->semantic_stagesurf, &video_data, &linesize)) {
+			sc_semantic_segmenter_submit_rgba(f->semantic_segmenter, video_data, f->semantic_capture_width,
+							  f->semantic_capture_height, linesize);
+			gs_stagesurface_unmap(f->semantic_stagesurf);
+		}
+		f->semantic_stage_pending = false;
+	}
+
+	if (f->semantic_stage_pending || sc_semantic_segmenter_is_busy(f->semantic_segmenter))
+		return;
+
+	uint32_t source_width = obs_source_get_base_width(target);
+	uint32_t source_height = obs_source_get_base_height(target);
+	if (source_width == 0 || source_height == 0 || !f->semantic_texrender)
+		return;
+
+	const uint32_t maximum_dimension = 512;
+	float scale = fminf(1.0f, (float)maximum_dimension /
+					  (float)(source_width > source_height ? source_width : source_height));
+	uint32_t capture_width = (uint32_t)fmaxf(floorf((float)source_width * scale + 0.5f), 2.0f);
+	uint32_t capture_height = (uint32_t)fmaxf(floorf((float)source_height * scale + 0.5f), 2.0f);
+	semantic_prepare_capture_surface(f, capture_width, capture_height);
+	if (!f->semantic_stagesurf)
+		return;
+
+	gs_texrender_reset(f->semantic_texrender);
+	gs_blend_state_push();
+	gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
+	if (gs_texrender_begin(f->semantic_texrender, capture_width, capture_height)) {
+		struct vec4 clear_color;
+		vec4_zero(&clear_color);
+		gs_clear(GS_CLEAR_COLOR, &clear_color, 0.0f, 0);
+		/* Use source coordinates in the smaller render target to preserve the
+		 * original aspect ratio while Vision receives a bounded 512px frame. */
+		gs_ortho(0.0f, (float)source_width, 0.0f, (float)source_height, -1.0f, 1.0f);
+		obs_source_video_render(target);
+		gs_texrender_end(f->semantic_texrender);
+		gs_texture_t *texture = gs_texrender_get_texture(f->semantic_texrender);
+		if (texture) {
+			gs_stage_texture(f->semantic_stagesurf, texture);
+			f->semantic_stage_pending = true;
+		}
+	}
+	gs_blend_state_pop();
 }
 
 /* Auto-tune phase 1: render source to texrender and stage to CPU */
@@ -537,6 +720,7 @@ static void auto_tune_phase2(struct smart_chroma_data *f)
 	obs_data_set_double(settings, "temporal_stability", 0.72);
 	obs_data_set_double(settings, "hair_detail", 0.85);
 	obs_data_set_double(settings, "hair_softness", 0.35);
+	obs_data_set_double(settings, "hair_density", 0.8);
 	obs_data_set_double(settings, "edge_blur", 0.65);
 	obs_data_set_double(settings, "edge_shrink", 0.0);
 	obs_data_set_double(settings, "edge_grow", 0.0);
@@ -598,10 +782,14 @@ static obs_properties_t *smart_chroma_properties(void *data)
 	obs_properties_add_float_slider(p, "base_key", obs_module_text("BaseKey"), -0.5, 1.0, 0.001);
 	obs_properties_add_float_slider(p, "edge_softness", obs_module_text("EdgeSoftness"), 0.001, 1.0, 0.001);
 	obs_properties_add_float_slider(p, "background_clean", obs_module_text("BackgroundClean"), 0.0, 1.0, 0.001);
+#ifdef __APPLE__
+	obs_properties_add_bool(p, "semantic_protection", obs_module_text("SemanticProtection"));
+#endif
 
 	/* --- Hair Detail --- */
 	obs_properties_add_float_slider(p, "hair_detail", obs_module_text("HairDetail"), 0.0, 1.0, 0.01);
 	obs_properties_add_float_slider(p, "hair_softness", obs_module_text("HairSoftness"), 0.0, 1.0, 0.01);
+	obs_properties_add_float_slider(p, "hair_density", obs_module_text("HairDensity"), 0.0, 1.0, 0.01);
 
 	/* --- Edge Refinement --- */
 	obs_properties_add_float_slider(p, "edge_blur", obs_module_text("EdgeBlur"), 0.0, 5.0, 0.1);
@@ -641,9 +829,11 @@ static void smart_chroma_defaults(obs_data_t *s)
 	obs_data_set_default_double(s, "base_key", 0.035);
 	obs_data_set_default_double(s, "edge_softness", 0.1);
 	obs_data_set_default_double(s, "background_clean", 0.04);
+	obs_data_set_default_bool(s, "semantic_protection", true);
 
 	obs_data_set_default_double(s, "hair_detail", 0.85);
 	obs_data_set_default_double(s, "hair_softness", 0.35);
+	obs_data_set_default_double(s, "hair_density", 0.8);
 
 	obs_data_set_default_double(s, "edge_blur", 0.65);
 	obs_data_set_default_double(s, "edge_shrink", 0.0);
@@ -692,10 +882,14 @@ static void smart_chroma_render(void *data, gs_effect_t *effect)
 		return;
 	}
 
+	semantic_update(f, target);
+
 	/* Temporal stabilization needs the filtered frame in a history texture, so
 	 * direct rendering must be disabled for this filter. */
-	if (!obs_source_process_filter_begin(f->context, GS_RGBA, OBS_NO_DIRECT_RENDERING))
+	if (!obs_source_process_filter_begin(f->context, GS_RGBA, OBS_NO_DIRECT_RENDERING)) {
+		f->history_valid = false;
 		return;
+	}
 
 	/* Compute texel size */
 	uint32_t tw = obs_source_get_base_width(target);
@@ -719,10 +913,21 @@ static void smart_chroma_render(void *data, gs_effect_t *effect)
 	gs_effect_set_vec2(f->params.texel_size, &ts);
 	gs_texture_t *previous_texture = f->history_valid ? gs_texrender_get_texture(f->history[f->history_index])
 							  : NULL;
-	if (previous_texture)
-		gs_effect_set_texture(f->params.previous_image, previous_texture);
-	gs_effect_set_float(f->params.history_valid, previous_texture ? 1.0f : 0.0f);
+	gs_texture_t *previous_input = f->history_valid ? gs_texrender_get_texture(f->input_history[f->history_index])
+							: NULL;
+	/* Bind complete textures even on the first frame: some OpenGL drivers
+	 * validate all samplers before evaluating the validity branches. */
+	gs_effect_set_texture(f->params.previous_image, previous_texture ? previous_texture : f->empty_texture);
+	gs_effect_set_texture(f->params.previous_input, previous_input ? previous_input : f->empty_texture);
+	gs_effect_set_float(f->params.history_valid, previous_texture && previous_input ? 1.0f : 0.0f);
 	gs_effect_set_float(f->params.temporal_stability, f->temporal_stability);
+	gs_effect_set_texture(f->params.semantic_mask,
+			      f->semantic_mask_texture ? f->semantic_mask_texture : f->empty_texture);
+	gs_effect_set_float(f->params.semantic_mask_valid,
+			    f->semantic_enabled && f->semantic_mask_valid && f->semantic_mask_texture ? 1.0f : 0.0f);
+	gs_effect_set_vec4(f->params.face_rect, &f->semantic_face_rect);
+	gs_effect_set_float(f->params.face_valid,
+			    f->semantic_enabled && f->semantic_face_valid && f->semantic_mask_valid ? 1.0f : 0.0f);
 	gs_effect_set_int(f->params.screen_type, f->detected_screen_type);
 	gs_effect_set_vec4(f->params.key_color, &f->key_color);
 	gs_effect_set_float(f->params.base_key, f->base_key);
@@ -730,6 +935,7 @@ static void smart_chroma_render(void *data, gs_effect_t *effect)
 	gs_effect_set_float(f->params.background_clean, f->background_clean);
 	gs_effect_set_float(f->params.hair_detail, f->hair_detail);
 	gs_effect_set_float(f->params.hair_softness, f->hair_softness);
+	gs_effect_set_float(f->params.hair_density, f->hair_density);
 	gs_effect_set_float(f->params.edge_blur, f->edge_blur);
 	gs_effect_set_float(f->params.edge_shrink, f->edge_shrink);
 	gs_effect_set_float(f->params.edge_grow, f->edge_grow);
@@ -774,6 +980,23 @@ static void smart_chroma_render(void *data, gs_effect_t *effect)
 	}
 
 	gs_texture_t *output_texture = gs_texrender_get_texture(next_history);
+	/* Read the same cached OBS input with a copy technique. Keep source colors
+	 * separate from the reconstructed output so spill removal is never mistaken
+	 * for motion. No second camera render or CPU readback is needed. */
+	bool input_captured = false;
+	gs_texrender_t *next_input = f->input_history[next_history_index];
+	if (next_input) {
+		gs_texrender_reset(next_input);
+		gs_blend_state_push();
+		gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
+		if (gs_texrender_begin(next_input, tw, th)) {
+			gs_ortho(0.0f, (float)tw, 0.0f, (float)th, -100.0f, 100.0f);
+			obs_source_process_filter_tech_end(f->context, f->effect, tw, th, "Capture");
+			gs_texrender_end(next_input);
+			input_captured = true;
+		}
+		gs_blend_state_pop();
+	}
 	gs_effect_t *default_effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
 	if (!output_texture || !default_effect) {
 		f->history_valid = false;
@@ -786,7 +1009,7 @@ static void smart_chroma_render(void *data, gs_effect_t *effect)
 		gs_draw_sprite(output_texture, 0, tw, th);
 
 	f->history_index = next_history_index;
-	f->history_valid = true;
+	f->history_valid = input_captured;
 }
 
 static struct obs_source_info smart_chroma_key_filter = {

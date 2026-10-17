@@ -66,19 +66,40 @@ function(set_target_properties_plugin target)
   install(TARGETS ${target} LIBRARY DESTINATION .)
   install(FILES "$<TARGET_BUNDLE_DIR:${target}>.dsym" CONFIGURATIONS Release DESTINATION . OPTIONAL)
 
-  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/installer-resources")
+  set(_installer_source "${CMAKE_CURRENT_SOURCE_DIR}/cmake/macos/resources/installer")
+  set(_installer_resources "${CMAKE_CURRENT_BINARY_DIR}/installer-resources")
+  file(REMOVE_RECURSE "${_installer_resources}" "${CMAKE_CURRENT_BINARY_DIR}/installer-scripts")
+  file(MAKE_DIRECTORY "${_installer_resources}")
   configure_file(cmake/macos/resources/distribution.in "${CMAKE_CURRENT_BINARY_DIR}/distribution" @ONLY)
   configure_file(
-    cmake/macos/resources/welcome.html.in
-    "${CMAKE_CURRENT_BINARY_DIR}/installer-resources/welcome.html"
+    "${_installer_source}/component.plist.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/installer-component.plist"
     @ONLY
   )
   configure_file(
-    cmake/macos/resources/conclusion.html.in
-    "${CMAKE_CURRENT_BINARY_DIR}/installer-resources/conclusion.html"
+    "${_installer_source}/scripts/preinstall.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/installer-scripts/preinstall"
     @ONLY
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
   )
-  configure_file(LICENSE "${CMAKE_CURRENT_BINARY_DIR}/installer-resources/LICENSE.txt" COPYONLY)
+  foreach(_language IN ITEMS en fa)
+    foreach(_page IN ITEMS welcome.html readme.html conclusion.html Localizable.strings)
+      configure_file(
+        "${_installer_source}/${_language}.lproj/${_page}.in"
+        "${_installer_resources}/${_language}.lproj/${_page}"
+        @ONLY
+      )
+    endforeach()
+  endforeach()
+  # Unlocalized page fallbacks. productbuild keeps strings only inside .lproj
+  # folders; Installer falls back to en.lproj for them.
+  foreach(_page IN ITEMS welcome.html readme.html conclusion.html)
+    configure_file("${_installer_resources}/en.lproj/${_page}" "${_installer_resources}/${_page}" COPYONLY)
+  endforeach()
+  foreach(_artwork IN ITEMS background.tiff background-dark.tiff)
+    configure_file("${_installer_source}/${_artwork}" "${_installer_resources}/${_artwork}" COPYONLY)
+  endforeach()
+  configure_file(LICENSE "${_installer_resources}/LICENSE.txt" COPYONLY)
   configure_file(cmake/macos/resources/create-package.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/create-package.cmake" @ONLY)
   install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/create-package.cmake")
 endfunction()
