@@ -89,6 +89,8 @@ function Package {
         throw 'Modern and legacy plugin DLLs differ. Clean and rebuild the Windows install tree.'
     }
 
+    Copy-Item (Join-Path $ProjectRoot 'scripts/WINDOWS-INSTALL.txt') (Join-Path $ReleaseDirectory 'INSTALL-WINDOWS.txt') -Force
+
     Log-Group "Archiving ${ProductName}..."
     $CompressArgs = @{
         Path = (Get-ChildItem -Path $ReleaseDirectory -Exclude "${OutputName}*.*")

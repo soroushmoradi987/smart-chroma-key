@@ -1,0 +1,44 @@
+Smart Chroma Key 1.4.1 - Windows x64 / OBS Studio
+
+1. Fully close OBS Studio.
+2. Open this location in Explorer (paste it into the address bar):
+   %ProgramData%\obs-studio\plugins
+3. Move any existing smart-chroma-key folder OUTSIDE the plugins directory
+   as a backup. Do not leave a renamed copy inside plugins (OBS may load it).
+4. Extract the smart-chroma-key folder from this ZIP into plugins.
+   The result must be:
+   C:\ProgramData\obs-studio\plugins\smart-chroma-key\smart-chroma-key.dll
+   C:\ProgramData\obs-studio\plugins\smart-chroma-key\bin\64bit\smart-chroma-key.dll
+   C:\ProgramData\obs-studio\plugins\smart-chroma-key\data\smart-chroma-key.effect
+   C:\ProgramData\obs-studio\plugins\smart-chroma-key\data\rvm.onnx
+   C:\ProgramData\obs-studio\plugins\smart-chroma-key\data\runtime\sck-onnxruntime.dll
+   Copy the ENTIRE folder. Do not copy just the DLL or create an extra nested folder.
+5. Start OBS. On your camera source: Filters > Effect Filters > Smart Chroma Key.
+6. Processing method:
+   Smart Chroma Key (Classic): green/blue screen keying with the original controls.
+   AI - Robust Video Matting (RVM): person matting using the bundled AI model.
+
+AI runs locally on the CPU. No account, internet connection, separate Python
+installation, CUDA, or model download is needed. First activation takes a few
+seconds. Start at 640 (balanced); choose 320 for a slower CPU or 960/1280 for more
+detail. Higher resolutions cost CPU time and can lower the AI frame rate.
+Classic and AI have separate controls. AI preview modes are for inspecting the
+matte; select Transparent for normal use in your scene.
+
+The Apple Vision person-protection checkbox is macOS-only. Windows AI is the
+RVM processing method listed above; it is not an Apple Vision checkbox.
+
+The ZIP supports normal (non-portable) OBS installations. If OBS loads an old
+plugin version, check for another smart-chroma-key.dll under the OBS installation's
+obs-plugins\64bit directory. Move only that old Smart Chroma Key DLL outside the
+OBS directories while OBS is closed, then restart OBS.
+
+For diagnosis: Help > Log Files > View Current Log. Search for Smart Chroma Key,
+shader diagnostics, or Windows AI. Report the plugin version, OBS version and log.
+
+برای نصب: OBS را کامل ببندید. پوشهٔ smart-chroma-key داخل ZIP را در مسیر
+C:\ProgramData\obs-studio\plugins
+قرار دهید. نسخهٔ قبلی را ابتدا برای پشتیبان‌گیری به بیرون از پوشهٔ plugins منتقل کنید.
+کل پوشه را کپی کنید، نه فقط DLL. سپس OBS را باز کنید و در تنظیمات فیلتر،
+Processing method را روی AI - Robust Video Matting (RVM) بگذارید.
+هوش مصنوعی روی CPU اجرا می‌شود؛ برای سیستم ضعیف‌تر وضوح 320 را انتخاب کنید.

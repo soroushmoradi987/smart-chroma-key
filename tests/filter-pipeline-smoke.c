@@ -143,7 +143,7 @@ int main(int argc, char **argv)
 						   GS_BLEND_INVSRCALPHA);
 			if (!gs_texrender_begin(target, 64, 64))
 				return 6;
-			vec4_set(&clear, backdrop, backdrop, backdrop, 1.0f);
+			vec4_set(&clear, (float)backdrop, (float)backdrop, (float)backdrop, 1.0f);
 			gs_clear(GS_CLEAR_COLOR, &clear, 0, 0);
 			gs_ortho(0, 64, 0, 64, -100, 100);
 			obs_source_video_render(source);

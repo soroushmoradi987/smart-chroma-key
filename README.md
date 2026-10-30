@@ -2,6 +2,26 @@
 
 A professional chroma key plugin for OBS Studio with dedicated green-screen and blue-screen processing, advanced edge recovery, and broadcast-quality controls.
 
+## Windows 1.4.1: Direct3D fix and bundled AI
+
+The Classic shader used `line` as a local variable, which is reserved in HLSL.
+Direct3D rejected the shader and the filter passed video through while showing
+controls. The variable is now renamed without changing the algorithm, shader
+errors are logged, and a failed shader is reported in the filter properties.
+
+Windows packages include **AI - Robust Video Matting (RVM)** using the official
+FP32 MobileNetV3 ONNX model and a private ONNX Runtime CPU backend. Inference is
+asynchronous with one job in flight, recurrent state, and paired foreground,
+alpha and input frames. The processing resolution is selectable from 320 to 1280;
+640 is the default. This does not add Apple Vision to Windows. CPU performance
+and real-camera edge quality depend on the recipient's system and footage.
+
+The Windows AI workflow builds a ZIP and runs real libobs/Direct3D checks for the
+old shader failure, corrected Classic pixels, opacity/brightness controls, AI
+inference, preview controls, switching methods, and Classic without AI files.
+See [manual ZIP installation](scripts/WINDOWS-INSTALL.txt). Extract the complete
+`smart-chroma-key` folder into `%ProgramData%\obs-studio\plugins` while OBS is closed.
+
 ## Features
 
 - **Automatic Screen Detection**: Detects green versus blue and estimates the actual screen chromaticity from hundreds of robust border samples
