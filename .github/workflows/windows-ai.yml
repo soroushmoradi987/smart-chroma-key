@@ -1,0 +1,43 @@
+name: Windows AI ZIP and Direct3D verification
+on:
+  push:
+    branches: [build/windows-ai-1.4.1]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - name: Configure and build Windows AI
+        shell: pwsh
+        run: |
+          cmake --preset windows-ci-x64 -DSCK_BUILD_WINDOWS_TESTS=ON -DSCK_WINDOWS_AI=ON
+          if ($LASTEXITCODE) { throw 'Configure failed' }
+          cmake --build --preset windows-x64 --config Release --parallel
+          if ($LASTEXITCODE) { throw 'Build failed' }
+          cmake --install build_x64 --prefix release/Release --config Release
+          if ($LASTEXITCODE) { throw 'Install failed' }
+      - name: Verify shipped payload on Direct3D 11
+        shell: pwsh
+        run: .github/scripts/Test-Windows.ps1
+      - name: Package ProgramData ZIP
+        shell: pwsh
+        run: |
+          .github/scripts/Package-Windows.ps1 -Configuration Release
+          if ($LASTEXITCODE) { throw 'Packaging failed' }
+          Get-ChildItem release/*.zip | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
+          } | Set-Content release/SHA256SUMS.txt
+          @("Version: 1.4.1", "Commit: $env:GITHUB_SHA", "Run: https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID", "Validated: Direct3D shader regression, Classic pixels and controls, AI inference and previews, method switching, Classic without AI dependencies", "AI backend: ONNX Runtime CPU; GPU acceleration not included", "Real camera / recipient GPU performance: requires recipient validation") | Set-Content release/BUILD-INFO.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smart-chroma-key-1.4.1-windows-x64
+          if-no-files-found: warn
+          path: |
+            release/*.zip
+            release/*.txt
+            build_x64/*.log

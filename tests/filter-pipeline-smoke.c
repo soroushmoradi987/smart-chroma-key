@@ -84,6 +84,15 @@ int main(int argc, char **argv)
 	obs_leave_graphics();
 	int ok = 1;
 	for (int frame = 0; frame < 8; frame++) {
+		if (frame == 2) {
+			/* Inactive RVM settings must not change Classic output. */
+			obs_data_t *change = obs_data_create();
+			obs_data_set_double(change, "rvm_halo", 1.0);
+			obs_data_set_int(change, "rvm_view", 3);
+			obs_data_set_int(change, "rvm_screen", 2);
+			obs_source_update(filter, change);
+			obs_data_release(change);
+		}
 		for (int y = 0; y < 64; y++)
 			for (int x = 0; x < 64; x++) {
 				size_t i = (y * 64 + x) * 4;

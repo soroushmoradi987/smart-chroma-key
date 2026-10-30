@@ -81,6 +81,14 @@ function Package {
         throw "Plugin data directory not found at ${PluginDataDirectory}."
     }
 
+    $ModernPluginBinaryPath = Join-Path $InstalledPluginDirectory "${ProductName}.dll"
+    if ( ! ( Test-Path $ModernPluginBinaryPath -PathType Leaf ) ) {
+        throw 'Modern OBS plugin DLL is missing. Re-run CMake configure, build and install before packaging.'
+    }
+    if ( (Get-FileHash $PluginBinaryPath).Hash -ne (Get-FileHash $ModernPluginBinaryPath).Hash ) {
+        throw 'Modern and legacy plugin DLLs differ. Clean and rebuild the Windows install tree.'
+    }
+
     Log-Group "Archiving ${ProductName}..."
     $CompressArgs = @{
         Path = (Get-ChildItem -Path $ReleaseDirectory -Exclude "${OutputName}*.*")

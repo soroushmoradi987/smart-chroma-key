@@ -43,6 +43,8 @@ VersionInfoProductVersion={#MyAppVersion}
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
+; OBS 33+ uses the bundle root. Keep the identical legacy copy for OBS 31/32.
+Source: "@STAGING_DIR@\\plugin\\bin\\64bit\\@PRODUCT_NAME@.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "@STAGING_DIR@\\plugin\\bin\\64bit\\@PRODUCT_NAME@.dll"; DestDir: "{app}\\bin\\64bit"; Flags: ignoreversion
 Source: "@STAGING_DIR@\\plugin\\data\\*"; DestDir: "{app}\\data"; Flags: ignoreversion recursesubdirs createallsubdirs
 

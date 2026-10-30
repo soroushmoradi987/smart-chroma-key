@@ -22,6 +22,9 @@ function(set_target_properties_plugin target)
 
   set_target_properties(${target} PROPERTIES VERSION 0 SOVERSION ${PLUGIN_VERSION})
 
+  # OBS 33+ loads the DLL beside data; OBS 31/32 still need bin/64bit.
+  # OBS 33 skips the legacy copy after loading the modern one.
+  install(TARGETS ${target} RUNTIME DESTINATION "${target}" LIBRARY DESTINATION "${target}")
   install(TARGETS ${target} RUNTIME DESTINATION "${target}/bin/64bit" LIBRARY DESTINATION "${target}/bin/64bit")
 
   install(

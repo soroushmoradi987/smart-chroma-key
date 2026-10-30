@@ -1,0 +1,39 @@
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform texture2d original;
+uniform float Halo;
+uniform float Despill;
+uniform int Screen;
+uniform int View;
+sampler_state s { Filter = Linear; AddressU = Clamp; AddressV = Clamp; };
+struct VertData { float4 pos : POSITION; float2 uv : TEXCOORD0; };
+VertData VSDefault(VertData v_in) { v_in.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj); return v_in; }
+float4 PSRefine(VertData v_in) : TARGET {
+    float4 c = image.Sample(s, v_in.uv);
+    float3 raw = original.Sample(s, v_in.uv).rgb;
+    // Remap the whole translucent edge, not just almost-transparent pixels.
+    // Zero is an exact bypass; opaque foreground stays opaque. At maximum,
+    // coverage below 0.55 is removed, so fine hair can also be reduced.
+    float cleanup = saturate(Halo);
+    float cutoff = cleanup * 0.55;
+    float a = saturate((c.a - cutoff) / (1.0 - cutoff));
+    if (Screen != 0) {
+        float key = Screen == 1 ? raw.g : raw.b;
+        float other = Screen == 1 ? max(raw.r, raw.b) : max(raw.r, raw.g);
+        float spillEvidence = smoothstep(0.015, 0.10, key - other);
+        // Use the model's foreground reconstruction, then remove remaining
+        // screen dominance without brightening a faint fringe into a halo.
+        float selected = Screen == 1 ? c.g : c.b;
+        float opposing = Screen == 1 ? max(c.r, c.b) : max(c.r, c.g);
+        float excess = max(selected - opposing, 0.0) * Despill;
+        if (Screen == 1) c.g -= excess; else c.b -= excess;
+        // Reach medium-coverage colored fringes while protecting opaque pixels.
+        a *= 1.0 - cleanup * spillEvidence * (1.0 - smoothstep(0.10, 0.90, c.a)) * 0.85;
+    }
+    c.rgb = saturate(c.rgb); c.a = a;
+    if (View == 1) return float4(c.rgb * a + (1.0 - a), 1.0);
+    if (View == 2) return float4(c.rgb * a, 1.0);
+    if (View == 3) return float4(a, a, a, 1.0);
+    return c;
+}
+technique Draw { pass { vertex_shader = VSDefault(v_in); pixel_shader = PSRefine(v_in); } }

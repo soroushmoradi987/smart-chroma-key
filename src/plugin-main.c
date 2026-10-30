@@ -9,6 +9,7 @@ Copyright (C) 2026 Soroush Moradi
 #include <graphics/vec4.h>
 #include <plugin-support.h>
 #include "semantic-mask.h"
+#include "processing-method.h"
 #include <math.h>
 
 OBS_DECLARE_MODULE()
@@ -269,7 +270,12 @@ static void *smart_chroma_create(obs_data_t *settings, obs_source_t *context)
 	}
 
 	obs_enter_graphics();
-	f->effect = path ? gs_effect_create_from_file(path, NULL) : NULL;
+	char *shader_errors = NULL;
+	f->effect = path ? gs_effect_create_from_file(path, &shader_errors) : NULL;
+	if (shader_errors) {
+		obs_log(LOG_ERROR, "Classic shader diagnostics: %s", shader_errors);
+		bfree(shader_errors);
+	}
 	f->texrender = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->semantic_texrender = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->history[0] = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
@@ -767,6 +773,11 @@ static bool screen_type_modified(obs_properties_t *props, obs_property_t *proper
 static obs_properties_t *smart_chroma_properties(void *data)
 {
 	obs_properties_t *p = obs_properties_create();
+	struct smart_chroma_data *f = data;
+	if (f && !f->effect)
+		obs_properties_add_text(p, "shader_error",
+			"Processing could not start: the shader is missing or failed to compile. "
+			"Reinstall the complete plugin and restart OBS. See the OBS log for details.", OBS_TEXT_INFO);
 
 	/* --- Auto Tune Button --- */
 	obs_properties_add_button2(p, "auto_tune", obs_module_text("AutoTune"), auto_tune_clicked, data);
@@ -1025,9 +1036,14 @@ static struct obs_source_info smart_chroma_key_filter = {
 	.video_render = smart_chroma_render,
 };
 
+const struct obs_source_info *sc_classic_engine(void)
+{
+	return &smart_chroma_key_filter;
+}
+
 bool obs_module_load(void)
 {
-	obs_register_source(&smart_chroma_key_filter);
+	obs_register_source(sc_processing_filter());
 	obs_log(LOG_INFO, "plugin loaded successfully (version %s)", PLUGIN_VERSION);
 	return true;
 }

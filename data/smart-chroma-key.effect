@@ -516,9 +516,9 @@ float fit_boundary(float2 uv, float3 observed, out float3 foreground, out float 
     screen_weight += b7;
     foreground = foreground_sum / max(foreground_weight, 0.001);
     float3 screen = screen_sum / max(screen_weight, 0.001);
-    float3 line = foreground - screen;
-    float energy = dot(line, line);
-    float coverage = saturate(dot(observed - screen, line) / max(energy, 0.002));
+    float3 color_axis = foreground - screen;
+    float energy = dot(color_axis, color_axis);
+    float coverage = saturate(dot(observed - screen, color_axis) / max(energy, 0.002));
     float3 residual = observed - lerp(screen, foreground, coverage);
     confidence = (1.0 - smoothstep(0.0004, 0.004, dot(residual, residual))) *
                         smoothstep(0.5, 2.5, foreground_weight) *

@@ -1,0 +1,6 @@
+Robust Video Matting (RVM)
+Authors: Shanchuan Lin, Linjie Yang, Imran Saleemi, Soumyadip Sengupta
+Upstream: https://github.com/PeterL1n/RobustVideoMatting
+macOS model: rvm_mobilenetv3_1920x1080_s0.25_fp16.mlmodel, release v1.0.0
+Windows model: rvm_mobilenetv3_fp32.onnx, release v1.0.0
+The upstream model license is included in rvm-model-license.txt.
