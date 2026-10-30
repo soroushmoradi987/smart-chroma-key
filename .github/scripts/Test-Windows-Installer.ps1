@@ -16,6 +16,7 @@ public static class WizardWindow {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
 }
 '@
 function Capture-Wizard($Process, $Name) {
@@ -34,11 +35,16 @@ function Capture-Wizard($Process, $Name) {
     return $Window
 }
 function Click-Button($Window, $Pattern) {
-    $Buttons = $Window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-        (New-Object System.Windows.Automation.PropertyCondition ([System.Windows.Automation.AutomationElement]::ControlTypeProperty), ([System.Windows.Automation.ControlType]::Button)))
+    # Inno's custom controls expose themselves as Panes on Windows Server.
+    $Buttons = $Window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
     foreach ($Button in $Buttons) {
         if ($Button.Current.Name -match $Pattern -and $Button.Current.IsEnabled -and !$Button.Current.IsOffscreen) {
-            $Button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+            $Handle = [IntPtr]$Button.Current.NativeWindowHandle
+            if ($Handle -ne [IntPtr]::Zero) {
+                [void][WizardWindow]::SendMessage($Handle, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)
+            } else {
+                $Button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+            }
             Start-Sleep -Milliseconds 600
             return
         }
@@ -59,14 +65,10 @@ foreach ($Language in @('english', 'farsi')) {
         Start-Sleep -Milliseconds 600
         $Window = Capture-Wizard $WindowProcess "wizard-$Language-welcome"
         if ($Language -eq 'english') {
-            Click-Button $Window 'Next'
+            Click-Button $Window '^Next( >)?$'
             $Window = Capture-Wizard $WindowProcess 'wizard-english-license'
-            $Radios = $Window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-                (New-Object System.Windows.Automation.PropertyCondition ([System.Windows.Automation.AutomationElement]::ControlTypeProperty), ([System.Windows.Automation.ControlType]::RadioButton)))
-            foreach ($Radio in $Radios) {
-                if ($Radio.Current.Name -match '^I accept') { $Radio.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() }
-            }
-            Click-Button $Window 'Next'
+            Click-Button $Window '^I accept the agreement$'
+            Click-Button $Window '^Next( >)?$'
             $null = Capture-Wizard $WindowProcess 'wizard-english-guide'
         }
     } finally {
