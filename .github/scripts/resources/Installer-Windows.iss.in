@@ -27,6 +27,11 @@ PrivilegesRequired=admin
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+WizardSizePercent=110
+WizardImageFile="@BRANDING_DIR@\wizard.bmp"
+WizardSmallImageFile="@BRANDING_DIR@\wizard-small.bmp"
+SetupIconFile="@BRANDING_DIR@\setup.ico"
+UninstallDisplayIcon={app}\setup.ico
 DisableWelcomePage=no
 DisableDirPage=yes
 DisableProgramGroupPage=yes
@@ -40,13 +45,34 @@ VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"; InfoBeforeFile: "@RESOURCE_DIR@\guide-en.txt"
+Name: "farsi"; MessagesFile: "compiler:Default.isl,@RESOURCE_DIR@\languages\Farsi.isl"; InfoBeforeFile: "@RESOURCE_DIR@\guide-fa.txt"
+
+[Messages]
+english.WelcomeLabel2=This wizard installs Smart Chroma Key {#MyAppVersion} for OBS Studio, including Classic keying and the AI person-matting model.%n%nClose OBS Studio before continuing. The plugin will be installed for all users.%n%nThe next pages explain how to add the filter and choose a processing method.
+farsi.WelcomeLabel2=این ویزارد Smart Chroma Key {#MyAppVersion} را همراه روش Classic و مدل هوش مصنوعی برای OBS Studio نصب می‌کند.%n%nپیش از ادامه OBS را کامل ببندید. افزونه برای همهٔ کاربران نصب می‌شود.%n%nدر صفحهٔ راهنما، روش افزودن فیلتر و انتخاب پردازش توضیح داده شده است.
+english.FinishedLabel=Smart Chroma Key is installed.%n%nOpen OBS Studio, right-click your camera, and choose Filters. Under Effect Filters, press + and add Smart Chroma Key.%n%nUse Processing method to choose Classic or AI - Robust Video Matting (RVM).
+farsi.FinishedLabel=نصب Smart Chroma Key تمام شد.%n%nدر OBS روی دوربین راست‌کلیک کنید و Filters را بزنید. در Effect Filters روی + بزنید و Smart Chroma Key را اضافه کنید.%n%nاز Processing method، روش Classic یا AI - Robust Video Matting (RVM) را انتخاب کنید.
+
+[CustomMessages]
+english.OpenGuide=Open the setup guide (English / فارسی)
+farsi.OpenGuide=باز کردن راهنمای نصب و استفاده (فارسی / English)
+english.GuideShortcut=Smart Chroma Key - Setup guide
+farsi.GuideShortcut=Smart Chroma Key - راهنمای استفاده
 
 [Files]
 ; OBS 33+ uses the bundle root. Keep the identical legacy copy for OBS 31/32.
 Source: "@STAGING_DIR@\\plugin\\bin\\64bit\\@PRODUCT_NAME@.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "@STAGING_DIR@\\plugin\\bin\\64bit\\@PRODUCT_NAME@.dll"; DestDir: "{app}\\bin\\64bit"; Flags: ignoreversion
 Source: "@STAGING_DIR@\\plugin\\data\\*"; DestDir: "{app}\\data"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "@BRANDING_DIR@\setup.ico"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{group}\{cm:GuideShortcut}"; Filename: "{app}\data\setup-guide.html"; IconFilename: "{app}\setup.ico"
+Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
+
+[Run]
+Filename: "{app}\data\setup-guide.html"; Description: "{cm:OpenGuide}"; Flags: shellexec postinstall skipifsilent
 
 [InstallDelete]
 ; Remove the broken split-layout DLL produced by version 1.1.0.

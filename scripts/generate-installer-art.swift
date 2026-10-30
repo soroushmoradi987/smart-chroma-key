@@ -144,3 +144,66 @@ try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDir
 try writeTIFF(named: "background.tiff", palette: lightPalette)
 try writeTIFF(named: "background-dark.tiff", palette: darkPalette)
 print("Wrote installer artwork to \(outputDirectory.path)")
+
+// Reuse the same vector mark for Windows and the offline setup guide.
+let windowsDirectory = URL(fileURLWithPath: ".github/scripts/resources/branding", isDirectory: true)
+try FileManager.default.createDirectory(at: windowsDirectory, withIntermediateDirectories: true)
+func bitmap(width: Int, height: Int, alpha: Bool = true, draw: (CGContext) -> Void) -> NSBitmapImageRep {
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)!
+    let context = NSGraphicsContext.current!.cgContext
+    context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+    context.setShouldAntialias(true)
+    draw(context)
+    NSGraphicsContext.restoreGraphicsState()
+    return rep
+}
+let logo = bitmap(width: 256, height: 256) { context in
+    drawMark(in: context, rect: CGRect(x: 20, y: 20, width: 216, height: 216))
+}
+let logoPNG = logo.representation(using: .png, properties: [:])!
+try logoPNG.write(to: windowsDirectory.appendingPathComponent("logo.png"))
+try logoPNG.write(to: outputDirectory.appendingPathComponent("logo.png"))
+let sidebar = bitmap(width: 328, height: 628, alpha: false) { context in
+    context.scaleBy(x: 2, y: 2)
+    context.setFillColor(NSColor(srgbRed: 0.035, green: 0.09, blue: 0.13, alpha: 1).cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: 164, height: 314))
+    drawGlow(in: context, palette: darkPalette)
+    drawMark(in: context, rect: CGRect(x: 31, y: 184, width: 102, height: 102))
+    drawText("SMART", at: CGPoint(x: 22, y: 145), font: NSFont.systemFont(ofSize: 17, weight: .bold), color: .white, kerning: 2)
+    drawText("CHROMA KEY", at: CGPoint(x: 22, y: 124), font: NSFont.systemFont(ofSize: 16, weight: .bold), color: .white)
+    drawText("Classic + AI", at: CGPoint(x: 22, y: 97), font: NSFont.systemFont(ofSize: 12, weight: .medium), color: screenGreen)
+    drawText("FOR OBS STUDIO", at: CGPoint(x: 22, y: 31), font: NSFont.systemFont(ofSize: 9, weight: .medium), color: NSColor(white: 0.76, alpha: 1), kerning: 0.7)
+}
+try sidebar.representation(using: .bmp, properties: [:])!.write(to: windowsDirectory.appendingPathComponent("wizard.bmp"))
+try sidebar.representation(using: .png, properties: [:])!.write(to: windowsDirectory.appendingPathComponent("wizard-preview.png"))
+let small = bitmap(width: 128, height: 128, alpha: false) { context in
+    context.setFillColor(NSColor.white.cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: 128, height: 128))
+    drawMark(in: context, rect: CGRect(x: 12, y: 12, width: 104, height: 104))
+}
+try small.representation(using: .bmp, properties: [:])!.write(to: windowsDirectory.appendingPathComponent("wizard-small.bmp"))
+// ICO directory with PNG images at all common Windows icon sizes.
+let sizes = [16, 32, 48, 64, 128, 256]
+let iconPNGs = sizes.map { size in
+    bitmap(width: size, height: size) { context in
+        let inset = CGFloat(size) * 0.08
+        drawMark(in: context, rect: CGRect(x: inset, y: inset, width: CGFloat(size) - 2 * inset, height: CGFloat(size) - 2 * inset))
+    }.representation(using: .png, properties: [:])!
+}
+var ico = Data()
+func append16(_ value: UInt16) { var v = value.littleEndian; withUnsafeBytes(of: &v) { ico.append(contentsOf: $0) } }
+func append32(_ value: UInt32) { var v = value.littleEndian; withUnsafeBytes(of: &v) { ico.append(contentsOf: $0) } }
+append16(0); append16(1); append16(UInt16(sizes.count))
+var offset = UInt32(6 + 16 * sizes.count)
+for (size, png) in zip(sizes, iconPNGs) {
+    ico.append(contentsOf: [UInt8(size % 256), UInt8(size % 256), 0, 0])
+    append16(1); append16(32); append32(UInt32(png.count)); append32(offset)
+    offset += UInt32(png.count)
+}
+for png in iconPNGs { ico.append(png) }
+try ico.write(to: windowsDirectory.appendingPathComponent("setup.ico"))
+print("Wrote Windows wizard, application icon and shared logo")

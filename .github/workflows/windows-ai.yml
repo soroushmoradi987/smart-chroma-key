@@ -1,4 +1,4 @@
-name: Windows AI ZIP and Direct3D verification
+name: Windows AI installers and Direct3D verification
 on:
   push:
     branches: [build/windows-ai-1.4.1]
@@ -23,15 +23,24 @@ jobs:
       - name: Verify shipped payload on Direct3D 11
         shell: pwsh
         run: .github/scripts/Test-Windows.ps1
-      - name: Package ProgramData ZIP
+      - name: Package branded installer and ZIP
         shell: pwsh
         run: |
-          .github/scripts/Package-Windows.ps1 -Configuration Release
+          $Inno = "${env:ProgramFiles(x86)}/Inno Setup 6"
+          if (!(Test-Path "$Inno/ISCC.exe")) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE) { throw 'Inno Setup installation failed' }
+          }
+          $env:PATH = "$Inno;$env:PATH"
+          .github/scripts/Package-Windows.ps1 -Configuration Release -CreateInstaller
           if ($LASTEXITCODE) { throw 'Packaging failed' }
-          Get-ChildItem release/*.zip | ForEach-Object {
+          Get-ChildItem release -File | Where-Object { $_.Extension -in '.zip', '.exe' } | ForEach-Object {
             "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
           } | Set-Content release/SHA256SUMS.txt
           @("Version: 1.4.1", "Commit: $env:GITHUB_SHA", "Run: https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID", "Validated: Direct3D shader regression, Classic pixels and controls, AI inference and previews, method switching, Classic without AI dependencies", "AI backend: ONNX Runtime CPU; GPU acceleration not included", "Real camera / recipient GPU performance: requires recipient validation") | Set-Content release/BUILD-INFO.txt
+      - name: Verify wizard, installed plugin and uninstall
+        shell: pwsh
+        run: .github/scripts/Test-Windows-Installer.ps1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -39,5 +48,9 @@ jobs:
           if-no-files-found: warn
           path: |
             release/*.zip
+            release/*.exe
             release/*.txt
             build_x64/*.log
+            build_x64/*.png
+            build_x64/*-ui.txt
+            build_x64/installer-verification.txt

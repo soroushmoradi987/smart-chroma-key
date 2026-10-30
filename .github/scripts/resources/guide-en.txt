@@ -1,0 +1,19 @@
+﻿SMART CHROMA KEY — CLASSIC + AI
+
+Before installation
+Close OBS Studio. This installer supports normal 64-bit OBS Studio installations on Windows 10/11. OBS Studio 31 or later is required. Administrator permission installs the plugin for all users under ProgramData.
+
+Add the filter
+Open OBS, right-click your camera source and choose Filters. Under Effect Filters, press + and select Smart Chroma Key.
+
+Choose a method
+Classic: for a green or blue screen. Use Auto Detect and Analyze Screen Now, then adjust hair, edges and reflected screen color.
+AI - Robust Video Matting (RVM): removes a person's background using the included model. Runs locally on the CPU; no extra download or account is required. First activation takes a few seconds.
+
+AI performance
+Start with 640 - balanced. Choose 320 for a slower computer, or 960/1280 for more detail. Higher resolution can lower the AI frame rate.
+Choose Transparent for normal output. White, Black and Alpha matte are inspection views.
+
+After installation
+The finish page can open the full offline guide in English and Persian. You can also find it in the Start menu under Smart Chroma Key.
+To remove the plugin, close OBS and uninstall Smart Chroma Key from Windows Settings > Apps. Your OBS scenes remain.

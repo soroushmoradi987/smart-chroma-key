@@ -131,13 +131,15 @@ function Package {
         '@OUTPUT_DIR@' = (Join-Path $ProjectRoot 'release')
         '@OUTPUT_BASENAME@' = $OutputInstallerName
         '@STAGING_DIR@' = $InstallerStageDirectory
+        '@BRANDING_DIR@' = (Join-Path $ScriptHome 'resources/branding')
+        '@RESOURCE_DIR@' = (Join-Path $ScriptHome 'resources')
     }
 
     foreach ( $Entry in $InstallerVariables.GetEnumerator() ) {
         $InstallerScript = $InstallerScript.Replace($Entry.Key, $Entry.Value.Replace('"', '""'))
     }
 
-    Set-Content -Path $InstallerScriptPath -Value $InstallerScript -NoNewline
+    Set-Content -Path $InstallerScriptPath -Value $InstallerScript -NoNewline -Encoding utf8BOM
 
     Log-Group "Building ${ProductName} installer..."
     Invoke-External $IsccCommand.Source '/Qp' $InstallerScriptPath
